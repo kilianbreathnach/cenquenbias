@@ -1,7 +1,9 @@
 using DataFrames
+using Distributions
 using Cosmology
 using Gadfly
-using Compose
+using Formatting
+using Compose, Colors
 include("./Jackknife.jl")
 using .Jackknife
 
@@ -174,7 +176,6 @@ specified mass ranges.
 function massenv_plot(galdf, col,
                       yticksarr, annotarr,
                       dbinedges, dmeans,
-                      samplevols,
                       logMedges = [9.4, 9.8, 10.3, 10.6, 11.0];
                       ptcolor = "blue",
                       nsubvols = 25)
@@ -194,8 +195,8 @@ function massenv_plot(galdf, col,
 
         # now get the values for each bin in density, computing the errors
         # using jackknife
-        jackvol = samplevols[i] / nsubvols
-        valmeans, valcovars = jackmeansvars(envmeans, length(ndbins),
+        ndbins = length(dbinedges) - 1
+        valmeans, valcovars = jackmeansvars(envmeans, ndbins,
                                             subdf, Array(subdf[:jackvol]),
                                             (cencol, dbinedges,))
         valerrs = sqrt.(diag(valcovars))
@@ -227,7 +228,6 @@ function massenv_plot(galdf, col,
         println(Formatting.format("χ² = {1:.1f}", chisquare))
         println(Formatting.format("χ²_ν = {1:.1f}", redchi))
         println(Formatting.format("p = {1:.3f}", pval))
-        println(valcovars)
         println("   ")
 
         plotlayers = [layer(x=dmeans[i, :], y=valmeans, Geom.point,
@@ -240,12 +240,17 @@ function massenv_plot(galdf, col,
         subplots[i] = plot(plotlayers...,
                            Guide.yticks(ticks=yrange),
                            Guide.xlabel(xlabel), Guide.ylabel(ylabel),
+                           Theme(panel_fill=colorant"white",
+                                 background_color=colorant"white",
+                                 major_label_font_size=12pt),
                            Guide.annotation(compose(context(),
                                                     Compose.text(anvals[1], yrange[anvals[2]],
-                                                                 Formatting.format("log₁₀(M<sub>*</sub>) = {1:.1f}", mlabels[i])))),
+                                                                 Formatting.format("log₁₀(M<sub>*</sub>) = {1:.1f}", mlabels[i])),
+                                                    fontsize(12pt))),
                            Guide.annotation(compose(context(),
                                                     Compose.text(anvals[1], yrange[anvals[2] - 1],
-                                                                 Formatting.format("χ²<sub>red</sub> = {1:.1f}", redchi)))))
+                                                                 Formatting.format("χ²<sub>red</sub> = {1:.1f}", redchi)),
+                                                    fontsize(12pt))))
     end
 
     fig = hstack(subplots[1:4])

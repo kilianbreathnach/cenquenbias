@@ -94,12 +94,12 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
                        nside::Int = 5, covar::Bool = true)
 
     # make an array to hold the subvolume observations
-    if obslen > 1
-        subobs = Array{Float64}(nside^2, obslen)
-    else
-        subobs = Array{Float64}(nside^2)
-    end
     nvols = nside^2
+    if obslen > 1
+        subobs = Array{Float64}(nvols, obslen)
+    else
+        subobs = Array{Float64}(nvols)
+    end
 
     # first get the observations
     for i in 1:nvols
@@ -117,7 +117,7 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
     fininds = Array{Array{Int}}(obslen)
 
     # this array will hold the jacknife sampled observations
-    jackarray = Array{Array{Float64}}(obslen)
+    jackarray = Array{Float64}(obslen, nvols)
     # and this holds the jackknife mean estimates
     jackmeans = Array{Float64}(obslen)
 
@@ -128,25 +128,23 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
         # and get their indices
         if obslen > 1
             nobsvols[j] = nobs = sum(finsubvols[:, j])
-            fininds[j] = fininds = find(finsubvols[:, j])
-            jackarray[j] = zeros(nobsvols)
+            fininds[j] = finds = find(finsubvols[:, j])
         else
             nobsvols[j] = nobs = sum(finsubvols)
-            fininds[j] = fininds = find(finsubvols)
-            jackarray[j] = zeros(nobs)
+            fininds[j] = finds = find(finsubvols)
         end
 
         volfac = 1 / (nobs - 1)
 
         for i in 1:nobs
             if obslen > 1
-                jackarray[j][i] = volfac * sum(subobs[fininds[find(1:nobs .!= i)], j])
+                jackarray[j, finds[i]] = volfac * sum(subobs[finds[find(1:nobs .!= i)], j])
             else
-                jackarray[j][i] = volfac * sum(subobs[fininds[find(1:nobs .!= i)]])
+                jackarray[j, finds[i]] = volfac * sum(subobs[finds[find(1:nobs .!= i)]])
             end
         end
 
-        jackmeans[j] = sum(jackarray[j][i]) / nobs
+        jackmeans[j] = sum(jackarray[j, finds]) / nobs
     end
 
     # and now to construct a covariance matrix
@@ -161,19 +159,23 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
 
             if !covar
 
-                idevs = [a - jm for a in subobs[fininds[i], i]]
+                idevs = [a - jm for a in jackarray[i, fininds[i]]]
                 ifac = 1 - (1 / nobsvols[i])
                 jackcovar[i] = ifac * sum(idevs .^ 2)
 
             else
 
                 for j in 1:i
-                    covarinds = finsubvols[:, i] .& finsubvols[:, j]
-                    nfinite = sum(covarinds)
+                    # get overlapping finite volumes for both observables
+                    covarinds = intersect(fininds[i], fininds[j])
+                    #covarinds = finsubvols[:, i] .& finsubvols[:, j]
+                    nfinite = length(covarinds)
                     volfac = 1 - (1 / nfinite)
-                    covarinds = find(covarinds)
-                    idevs = [a - jm for a in subobs[covarinds, i]]
-                    jdevs = [b - jackmeans[j] for b in subobs[covarinds, j]]
+                    #covarinds = find(covarinds)
+                    #idevs = [a - jm for a in subobs[covarinds, i]]
+                    idevs = [a - jm for a in jackarray[i, covarinds]]
+                    #jdevs = [b - jackmeans[j] for b in subobs[covarinds, j]]
+                    jdevs = [b - jackmeans[j] for b in jackarray[j, covarinds]]
                     jackcovar[i, j] = volfac * sum(idevs .* jdevs)
                     jackcovar[j, i] = jackcovar[i, j]
                 end
