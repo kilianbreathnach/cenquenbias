@@ -1,3 +1,4 @@
+using CSV
 using DataFrames
 using Distributions
 using Cosmology
@@ -13,7 +14,7 @@ This function loads the catalog from papers I, II, and III. It returns a
 set of galaxies that are found to be centrals with either 50% probability
 or 99% probability. It can return either quenched, or star-forming centrals.
 """
-function load_groupdat(; fullpure = "pure", quenform = "quen")
+function load_groupdat(samplerange = -1 ; fullpure = "pure", quenform = "quen")
 
     # get the data directory to pull the galaxies from
     datdir = join(split(Base.@__FILE__, "/")[1:(end - 2)], "/")
@@ -32,41 +33,47 @@ function load_groupdat(; fullpure = "pure", quenform = "quen")
                  string(datdir, "/groups/clf_groups_M20_M10.3.prob")]
     corrfiles = [string(datdir, "/groups/clf_groups_M18_M9.4.galdata_corr"),
                  string(datdir, "/groups/clf_groups_M19_M9.8.galdata_corr"),
-                 string(datdir, "/groups/clf_groups_M20_M10.2.galdata_corr")]
-    densfiles = [string(datdir, "/groups/densities/density_r10.M18_M9.4"),
-                 string(datdir, "/groups/densities/density_r10.M19_M9.8"),
-                 string(datdir, "/groups/densities/density_r10.M20_M10.3")]
-    randfiles = [string(datdir, "/groups/densities/drandom_r10.M18_M9.4"),
-                 string(datdir, "/groups/densities/drandom_r10.M19_M9.8"),
-                 string(datdir, "/groups/densities/drandom_r10.M20_M10.3")]
+                 string(datdir, "/groups/clf_groups_M20_M10.3.galdata_corr")]
+    densfiles = [string(datdir, "/groups/densities/density_M9.4_new.dat"),
+                 string(datdir, "/groups/densities/density_M9.8_new.dat"),
+                 string(datdir, "/groups/densities/density_M10.3_new.dat")]
 
     # store max redshift for computing sample volumes
     zmaxs = zeros(3)
     zmins = zeros(3)
 
-    for i in 1:3
+    if samplerange == -1
+        maxmasses = [9.8, 10.3, 11.0]
+    else
+        maxmasses = [11.0, 11.0, 11.0]
+    end
+
+    if samplerange == -1
+        sr = 1:3
+    else
+        sr = samplerange:samplerange
+    end
+
+    for i in sr
 
         # read the two catalogues in and join them on galaxy id
-        probdf = readtable(probfiles[i], separator=' ', header=false)
+        probdf = CSV.read(probfiles[i], delim=' ', header=false)
         names!(probdf, probnames)
-        corrdf = readtable(corrfiles[i], separator=' ', header=false)
+        corrdf = CSV.read(corrfiles[i], delim=' ', header=false)
         names!(corrdf, corrnames)
 
         # add a column for the density, corrected with the randoms
         density = readdlm(densfiles[i])
-        rands = readdlm(randfiles[i])
-        zi = find(rands[:, 1] .== 0)
-        ρ_corr = 1.25 * (density[:, 1] ./ rands[:, 1])
-        probdf[:ρ_env] = DataArray(ρ_corr)
-
-        # remove nan value (there was one row in rands that had a zero)
-        probdf = probdf[.!isnan.(probdf[:ρ_env]), :]
+        ρ_corr = density[:, 1]
+        probdf[:ρ_env] = Array(ρ_corr)
 
         joindf = join(probdf, corrdf, on=:galid)
 
         # take max z val
         zmaxs[i] = maximum(joindf[:cz])
         zmins[i] = minimum(joindf[:cz])
+
+        joindf = joindf[log10.(joindf[:stelM]) .< maxmasses[i], :]
 
         if i == 1
             fulldf = joindf
@@ -95,6 +102,7 @@ function load_groupdat(; fullpure = "pure", quenform = "quen")
     fulldf[:Dₙ4000] = fulldf[:Dn4000]
     fulldf[:logRe] = log10.(fulldf[:R_e])
     fulldf[:logsurf] = log10.(fulldf[:surfdensR_eo2])
+    fulldf[:logv] = log10.(fulldf[:vdisp])
 
     # get data deltas
     fulldf[:delta] = fulldf[:ρ_env] - 1

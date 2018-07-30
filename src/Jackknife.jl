@@ -7,7 +7,7 @@ using NearestNeighbors
 # using PyCall
 # @pyimport pymangle
 
-Pkg.checkout("Distances"); Pkg.build("Distances")
+# Pkg.checkout("Distances", "v0.6.0"); Pkg.build("Distances")
 using Distances
 
 export jackmeansvars
