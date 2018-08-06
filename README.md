@@ -14,7 +14,7 @@ notebooks which are in the `notebooks` directory. The order of the notebooks
 goes as:
 
 - `observations.ipynb` shows a run through of the data reduction and plotting
-- `galaxy_mass_model.ipynb` finds the best fit parameter values of the
+- `galaxy_mass.ipynb` finds the best fit parameter values of the
 stellar mass-halo mass relation for the galaxy samples using the EMERGE
 model from Moster et al. 2017
 - `mass_delta_mocks.ipynb` shows code for creating mock galaxy samples from

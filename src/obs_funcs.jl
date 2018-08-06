@@ -75,7 +75,7 @@ function load_groupdat(samplerange = -1 ; fullpure = "pure", quenform = "quen")
 
         joindf = joindf[log10.(joindf[:stelM]) .< maxmasses[i], :]
 
-        if i == 1
+        if i == 1 || samplerange != -1
             fulldf = joindf
         else
             fulldf = [fulldf; joindf]

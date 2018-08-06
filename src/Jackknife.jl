@@ -1,12 +1,6 @@
 module Jackknife
 using NearestNeighbors
 
-# # to call pymangle (no longer needed since I downloaded the randoms)
-# ENV["PYTHON"] = "/home/kilian/.envs/astro2.7/bin/python"
-# rm(Pkg.dir("PyCall","deps","PYTHON")); Pkg.checkout("PyCall"); Pkg.build("PyCall")
-# using PyCall
-# @pyimport pymangle
-
 # Pkg.checkout("Distances", "v0.6.0"); Pkg.build("Distances")
 using Distances
 
