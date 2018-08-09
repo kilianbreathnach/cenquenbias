@@ -58,7 +58,7 @@ This function creates a galaxy mock from the halo catalog, given a set of
 HOD parameters. It returns the galaxy positions, their host halo id, and
 a signifier for whether they are centrals or not.
 """
-function get_mock(paramdict, m_th)
+function get_mock(paramdict, m_th, nside)
 
     # Set the cosmology to match the Chinchilla simulation for galaxy mocks
     const cosmo = astrocosm.FlatLambdaCDM(H0=100, Om0=0.286)
@@ -93,11 +93,28 @@ function get_mock(paramdict, m_th)
     # create a column for central galaxies
     cens = [a == "centrals" ? 1 : 0 for a in model[:mock][:galaxy_table][:columns]["gal_type"]]
 
+    # finally create a subvolume column, indicating which subvolume
+    # each galaxy resides in
+    nvol = 1
+    subvols = zeros(size(x)[1])
+    for i in 1:nside
+        xinz = (((i - 1) / nside) * Lbox) .<= x .< ((i / nside) * Lbox)
+        for j in 1:nside
+            yinz = xinz .& ((((j - 1) / nside) * Lbox) .<= y .< ((j / nside) * Lbox))
+            for k in 1:nside
+                zinz = find(yinz .& ((((k - 1) / nside) * Lbox) .< pos[:, 3] .<= ((k / nside) * Lbox)))
+                subvols[zinz] = nvol
+                nvol += 1
+            end
+        end
+    end
+
     # and return an array
-    galsarr = zeros(length(cens), 5)
+    galsarr = zeros(length(cens), 6)
     galsarr[:, 1] = model[:mock][:galaxy_table][:columns]["halo_hostid"]
     galsarr[:, 2:4] = pos
     galsarr[:, 5] = cens
+    galsarr[:, 6] = subvols
 
     return galsarr
 end
