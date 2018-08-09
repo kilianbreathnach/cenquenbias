@@ -49,16 +49,17 @@ model parameters.
 function re_func(params::Array{Float64, 1},
                  mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1})
 
-    βr₀, βrm, βrmd, βrc, βrs = params
-    σᵣ = 0.02
+    βr₀, βrm, βrm2, βrmd, βrc, βrs = params
+    # σᵣ = 0.02
 
     for arr in mockdfs
         for df in arr
-            rs = randn(length(df[:logRe]))
-            rs = rs * σᵣ
-            rm = βr₀ + ((βrm * df[:logMh]) .+ (βrmd * df[:logMd]) .+
+            # rs = randn(length(df[:logRe]))
+            # rs = rs * σᵣ
+            rm = βr₀ + ((βrm * df[:logMh]) .+ (βrm2 * (df[:logMh] .^ 2)) .+
+                        (βrmd * df[:logMd]) .+
                         (βrc * df[:logc]) .+ (βrs * df[:logspin]))
-            df[:logRe] = rm .+ rs
+            df[:logRe] = rm  # .+ rs
         end
     end
 
@@ -85,17 +86,17 @@ This function does the same for surface density of a galaxy given a halo.
 function surfunc(params::Array{Float64, 1},
                  mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1})
 
-    βs₀, βsm, βsmd, βsc, βss = params[6:end]
-    σₛ = 0.02
+    βs₀, βsm, βsm2, βsmd, βsc, βss = params
+    # σₛ = 0.02
 
     for arr in mockdfs
         for df in arr
-            ss = randn(length(df[:logsurf]))
-            ss = ss * σₛ
-            sm = βs₀ + ((βsm * df[:logMh]) .+ # (βsm2 * (df[:logMh] .^ 2)) .+
+            # ss = randn(length(df[:logsurf]))
+            # ss = ss * σₛ
+            sm = βs₀ + ((βsm * df[:logMh]) .+ (βsm2 * (df[:logMh] .^ 2)) .+
                         (βsmd * df[:logMd]) .+
                         (βsc * df[:logc]) .+ (βss * df[:logspin]))
-            df[:logsurf] = sm .+ ss
+            df[:logsurf] = sm   # .+ ss
         end
     end
 
@@ -122,15 +123,17 @@ And one for velocity dispersion
 function v_func(params::Array{Float64, 1},
                  mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1})
 
-    βv₀, βvm, βvmd, βvc, βvs = params[11:end]
-    σᵥ = 0.02
+    βv₀, βvm, βvm2, βvmd, βvc, βvs = params
+    #σᵥ = 0.02
 
     for arr in mockdfs
         for df in arr
-            vs = randn(length(df[:logv]))
-            vs = vs * σᵥ
-            vm = βv₀ + ((βvm * df[:logMh]) .+ (βvmd * df[:logMd]) .+ (βvc * df[:logc]) .+ (βvs * df[:logspin]))
-            df[:logv] = vm .+ vs
+            # vs = randn(length(df[:logv]))
+            # vs = vs * σᵥ
+            vm = βv₀ + ((βvm * df[:logMh]) .+ (βvm2 * (df[:logMh] .^ 2)) .+
+                        (βvmd * df[:logMd]) .+
+                        (βvc * df[:logc]) .+ (βvs * df[:logspin]))
+            df[:logv] = vm   # .+ vs
         end
     end
 
@@ -153,10 +156,35 @@ observations then bins the observed data points into our histogram.
 """
 function gen_mod_bincounts(params::Array{Float64, 1},
                            mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1},
+                           varswitch::Array{Int, 1},
                            rbins, sbins, vbins)
-    re_func(params, mockdfs)
-    surfunc(params, mockdfs)
-    v_func(params, mockdfs)
+
+    # handle combinatorics of the three variable switches
+    if varswitch[1] == 1
+        re_func(params[1:6], mockdfs)
+
+        if varswitch[2] == 1
+            surfunc(params[7:12], mockdfs)
+
+            if varswitch[3] == 1
+                v_func(params[13:end], mockdfs)
+            end
+
+        elseif varswitch[3] == 1
+            v_func(params[7:12], mockdfs)
+        end
+
+    elseif varswitch[2] == 1
+        surfunc(params[1:6], mockdfs)
+
+        if varswitch[3] == 1
+            v_func(params[7:12], mockdfs)
+        end
+
+    elseif varswitch[3] == 1
+        v_func(params, mockdfs)
+    end
+
     hist = bincounts(mockdfs, rbins, sbins, vbins)
     hist
 end

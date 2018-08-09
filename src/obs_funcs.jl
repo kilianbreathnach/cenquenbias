@@ -126,7 +126,11 @@ function load_groupdat(samplerange = -1 ; fullpure = "pure", quenform = "quen")
     end
 
     # compute the comoving volume info
-    zmin = zmins[1] / 299792
+    if samplerange == -1
+        zmin = zmins[1] / 299792
+    else
+        zmin = zmins[samplerange] / 299792
+    end
     zmaxs = zmaxs / 299792
 
     # set a cosmology
