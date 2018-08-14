@@ -4,8 +4,8 @@ using NearestNeighbors
 
 # get halotools to build galaxy mocks
 # first two lines are necessary to get python environment with halotools
-ENV["PYTHON"] = "/home/kilian/.envs/astro3/bin/python"
-rm(Pkg.dir("PyCall","deps","PYTHON")); Pkg.checkout("PyCall"); Pkg.build("PyCall")
+# ENV["PYTHON"] = ""
+# rm(Pkg.dir("PyCall","deps","PYTHON")); Pkg.checkout("PyCall"); Pkg.build("PyCall")
 using PyCall
 
 @pyimport astropy.cosmology as astrocosm
@@ -58,7 +58,7 @@ This function creates a galaxy mock from the halo catalog, given a set of
 HOD parameters. It returns the galaxy positions, their host halo id, and
 a signifier for whether they are centrals or not.
 """
-function get_mock(paramdict, m_th, nside)
+function get_mock(paramdict, m_th, nside::Int = 3, Lbox::Float64 = 400.0)
 
     # Set the cosmology to match the Chinchilla simulation for galaxy mocks
     const cosmo = astrocosm.FlatLambdaCDM(H0=100, Om0=0.286)
