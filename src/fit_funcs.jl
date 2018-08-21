@@ -56,9 +56,9 @@ function re_func(params::Array{Float64, 1},
         for df in arr
             # rs = randn(length(df[:logRe]))
             # rs = rs * σᵣ
-            rm = βr₀ + ((βrm * df[:logMh]) .+ (βrm2 * (df[:logMh] .^ 2)) .+
-                        (βrmd * df[:logMd]) .+
-                        (βrc * df[:logc]) .+ (βrs * df[:logspin]))
+            rm = @. βr₀ + ((βrm * df[:logMh]) + (βrm2 * (df[:logMh] ^ 2)) +
+                           (βrmd * df[:logMd]) +
+                           (βrc * df[:logc]) + (βrs * df[:logspin]))
             df[:logRe] = rm  # .+ rs
         end
     end
@@ -93,9 +93,9 @@ function surfunc(params::Array{Float64, 1},
         for df in arr
             # ss = randn(length(df[:logsurf]))
             # ss = ss * σₛ
-            sm = βs₀ + ((βsm * df[:logMh]) .+ (βsm2 * (df[:logMh] .^ 2)) .+
-                        (βsmd * df[:logMd]) .+
-                        (βsc * df[:logc]) .+ (βss * df[:logspin]))
+            sm = @. βs₀ + ((βsm * df[:logMh]) + (βsm2 * (df[:logMh] ^ 2)) +
+                           (βsmd * df[:logMd]) +
+                           (βsc * df[:logc]) + (βss * df[:logspin]))
             df[:logsurf] = sm   # .+ ss
         end
     end
@@ -130,9 +130,9 @@ function v_func(params::Array{Float64, 1},
         for df in arr
             # vs = randn(length(df[:logv]))
             # vs = vs * σᵥ
-            vm = βv₀ + ((βvm * df[:logMh]) .+ (βvm2 * (df[:logMh] .^ 2)) .+
-                        (βvmd * df[:logMd]) .+
-                        (βvc * df[:logc]) .+ (βvs * df[:logspin]))
+            vm = @. βv₀ + ((βvm * df[:logMh]) + (βvm2 * (df[:logMh] ^ 2)) +
+                           (βvmd * df[:logMd]) +
+                           (βvc * df[:logc]) + (βvs * df[:logspin]))
             df[:logv] = vm   # .+ vs
         end
     end
@@ -199,5 +199,5 @@ to avoid unnecessary summing and unstable values.
 """
 function cstat(mod, obs, obsums, nonz)
     modsum = sum(mod)
-    return 2 * (modsum - obsums[1] + obsums[2] - sum(obs[nonz] .* log.(mod[nonz])))
+    return 2 * (modsum - obsums[1] + obsums[2] - sum(@. obs[nonz] * log(mod[nonz])))
 end

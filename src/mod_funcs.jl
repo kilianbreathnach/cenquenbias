@@ -23,7 +23,7 @@ using the fraction of peak mass as in Moster et al.
 function load_halodat()
 
     # get the data directory of the halo files
-    halodir = join(split(Base.@__FILE__, "/")[1:(end - 2)], "/")
+    halodir = join(split(abspath(@__FILE__), "/")[1:(end - 2)], "/")
     halodir = string(halodir, "/dat/halodat")
 
     halocols = [:halo_id, :halo_upid, :x, :y, :z, :vx, :vy, :vz, :hfoo1,

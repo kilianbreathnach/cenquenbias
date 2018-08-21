@@ -17,7 +17,7 @@ or 99% probability. It can return either quenched, or star-forming centrals.
 function load_groupdat(samplerange = -1 ; fullpure = "pure", quenform = "quen")
 
     # get the data directory to pull the galaxies from
-    datdir = join(split(Base.@__FILE__, "/")[1:(end - 2)], "/")
+    datdir = join(split(abspath(@__FILE__), "/")[1:(end - 2)], "/")
     datdir = string(datdir, "/dat")
 
     fulldf = DataFrame()

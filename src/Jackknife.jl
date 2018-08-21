@@ -15,7 +15,7 @@ be passed as nside. The function returns an array of N subvolume indices.
 function get_sdss_subvols(radec; nside = 5)
 
     # get the data directory
-    datdir = join(split(abspath(Base.@__FILE__), "/")[1:(end - 2)], "/")
+    datdir = join(split(abspath(@__FILE__), "/")[1:(end - 2)], "/")
     datdir = string(datdir, "/dat")
 
     # grab the randoms and put them in an array for the ball tree

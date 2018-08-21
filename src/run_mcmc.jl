@@ -5,112 +5,367 @@ include("./utils.jl")
 using CSV
 using AffineInvariantMCMC
 using CenQuenUtils
+
+import BlackBoxOptim
 import Jackknife.get_sdss_subvols
 
-# argument passed is number sample to run mcmc for
-num_sample = int(ARGS[2])
 
-# take the corresponding data
-datdf, vols = load_groupdat(num_sample)
-
-# compute jackknife volumes of the data points
-radecs = zeros(size(datdf)[1], 2)
-radecs[:, 1] = rad2deg.(datdf[:ra])
-radecs[:, 2] = rad2deg.(datdf[:dec])
-
-datdf[:jackvol] = get_sdss_subvols(radecs)
-
-# take the mock with masses and environment for modeling
-if num_sample == 1
-    mockdf = CSV.read([2])
-else if num_sample == 2
-    mockdf = CSV.read([2])
-else if num_sample == 3
-    mockdf = CSV.read([2])
-else
-    println("incorrect argument")
+"""
+Convert the parameter config integer to an array of zeros and ones
+representing the different parameters.
+"""
+function get_vars(var_int::Int)
+    return [parse(Int, n) for n in bin(var_int, 3)]
 end
 
-## add extra columns for modeling
-mockdf[:logMh] = log10.(mockdf[:halo_mvir])
-mockdf[:Mdot] = (mockdf[:halo_mvir] .- mockdf[:halo_mz_1]) ./ mockdf[:halo_mz_1]
-mockdf[:Mdot][mockdf[:halo_mz_1] .== 0] = 1
-mockdf[:logMd] = log10.(mockdf[:Mdot] + 1)
-mockdf[:logc] = log10.(mockdf[:halo_nfw_conc])
-mockdf[:logspin] = log10.(mockdf[:halo_spin])
-mockdf[:logρ] = log10.(mockdf[:delta] + 1)
-mockdf[:logRe] = ones(mockdf[:log10M]) * mean(datdf[:logRe])
-mockdf[:logsurf] = ones(mockdf[:log10M]) * mean(datdf[:logsurf])
-mockdf[:logv] = ones(mockdf[:log10M]) * mean(datdf[:logv])
 
-# TODO
-# TODO figure out how to pass the variables as arguments to script!!
-# TODO
+"""Compute filename strings from the sample number and variable switch"""
+function get_thres_varstring(sample_int::Int, varswitch::Array{Int})
 
-# Define the bin edges of the galaxy properties
-#mbins = [9.4, 9.6, 9.8, 10.1, 10.3, 10.45, 10.6, 10.8, 11.0]
-mbins = [9.4, 9.6, 9.8, 10.0, 10.2, 10.4, 10.6, 10.8, 11.0]
-#mbins = [9.4, 9.8, 10.3, 10.6, 11.0]
-#dbins = linspace(-0.5, 1, 9)
-dbins = linspace(-0.8, 1.0, 9)
-const rbins = [-3, -2.75, -2.5, -2.25, -2, -1.75]
-const sbins = [8.5, 8.75, 9.0, 9.25, 9.5]
-const vbins = [1.9, 2.05, 2.2, 2.35, 2.5]
-#const rbins = [minimum(datdf[:logRe]), maximum(datdf[:logRe]) + 1]
-#const sbins = [minimum(datdf[:logsurf]), maximum(datdf[:logsurf]) + 1]
-#const vbins = [minimum(datdf[:logv]), maximum(datdf[:logv]) + 1]
+    ths = [18, 19, 20, 20]
+    th = ths[sample_int]
 
-# the columns that matter for modeling
-datcols = [:log10M, :logρ, :logRe, :logsurf, :logv]
+    vars = ["Re", "surf", "vdisp"]
+    varstring = join(vars[Bool.(varswitch)], "_")
 
-# separate data into dataframes of mass and environment
-nmbins = length(mbins) - 1
-ndbins = length(dbins) - 1
+    return th, varstring
+end
 
-deltadat = Array{Array{DataFrame, 1}}(nmbins)
 
-for i in 1:nmbins
-    deltadat[i] = Array{DataFrame}(ndbins)
-    massdf = datdf[mbins[i] .<= datdf[:log10M] .< mbins[i + 1], datcols]
-    for j in 1:ndbins
-        deltadat[i][j] = massdf[dbins[j] .<= massdf[:logρ] .< dbins[j + 1], datcols]
+"""Add method for computing the strings directly from the config integers"""
+get_thres_varstring(sample_int::Int, varnum::Int) = get_thres_varstring(sample_int, get_vars(varnum))
+
+
+"""
+This function loads the correct NYU-VAGC data sample based on which mass range is being analysed
+"""
+function get_dat(data_sample::Int)
+
+    if data_sample in 1:3
+        datdf, vols = load_groupdat(data_sample)
+        volume = vols[data_sample]
+    elseif data_sample == 4
+        datdf, vols = load_groupdat(3)
+        volume = vols[3]
+    else
+        throw(ArgumentError("data_sample must be an integer from 1-4"))
+    end 
+
+    return datdf, volume
+end
+
+
+"""
+This function loads the mock that has previously been generated to match the
+stellar mass and environment density distributions of the corresponding data sample.
+"""
+function get_mock(data_sample::Int, meanr, means, meanv)
+
+    # load the corresponding mock
+    ths = [18, 19, 20, 20]
+    th = ths[data_sample]
+    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
+    datdir = string(datdir, "/dat")
+    mockdf = CSV.read(string(datdir, "/mocks/M", th, "_cenquen_mock.csv"))
+
+    ## add extra columns for modeling
+    mockdf[:logMh] = log10.(mockdf[:halo_mvir])
+    mockdf[:Mdot] = (mockdf[:halo_mvir] .- mockdf[:halo_mz_1]) ./ mockdf[:halo_mz_1]
+    mockdf[:Mdot][mockdf[:halo_mz_1] .== 0] = 1
+    mockdf[:logMd] = log10.(mockdf[:Mdot] + 1)
+    mockdf[:logc] = log10.(mockdf[:halo_nfw_conc])
+    mockdf[:logspin] = log10.(mockdf[:halo_spin])
+    mockdf[:logρ] = mockdf[:delta]
+    mockdf[:logRe] = ones(mockdf[:log10M]) * meanr
+    mockdf[:logsurf] = ones(mockdf[:log10M]) * means
+    mockdf[:logv] = ones(mockdf[:log10M]) * meanv
+
+    return mockdf
+end
+
+
+"""
+Based on the mass range and variable configuration being considered,
+this function sets the bin edges for the modeling.
+"""
+function set_bins(datdf, sample_num::Int, varswitch::Array{Int})
+
+    # Define the bin edges of the galaxy properties
+    if sample_num == 1
+        mbins = [9.4, 9.5, 9.6, 9.7, 9.8]
+    elseif sample_num == 2
+        mbins = [9.8, 9.9, 10.0, 10.1, 10.2, 10.3]
+    elseif sample_num == 3
+        mbins = [10.3, 10.4, 10.5, 10.6]
+    elseif sample_num == 4
+        mbins = [10.6, 10.7, 10.8, 10.9, 11.0]
+    end
+    dbins = Array(linspace(-0.8, 1.0, 9))
+    
+    if varswitch[1] == 1
+        rbins = [-3, -2.75, -2.5, -2.25, -2, -1.75]
+    else
+        rbins = [minimum(datdf[:logRe]), maximum(datdf[:logRe]) + 1]
+    end
+    
+    if varswitch[2] == 1
+        sbins = [8.5, 8.7, 8.9, 9.1, 9.3, 9.5]
+    else
+        sbins = [minimum(datdf[:logsurf]), maximum(datdf[:logsurf]) + 1]
+    end
+    
+    if varswitch[3] == 1
+        vbins = [1.9, 2.02, 2.14, 2.26, 2.38, 2.5]
+    else
+        vbins = [minimum(datdf[:logv]), maximum(datdf[:logv]) + 1]
+    end
+
+    return mbins, dbins, rbins, sbins, vbins
+end
+
+
+"""
+This function makes arrays of dataframes separated by stellar mass and
+environment density bins, as required for computing the histograms.
+"""
+function make_dfarrs(datdf::DataFrame, mockdf::DataFrame,
+                     mbins::Array{Float64}, dbins::Array{Float64},
+                     nmbins::Int, ndbins::Int)
+
+    const datcols = [:log10M, :logρ, :logRe, :logsurf, :logv]
+    const mockcols = [:logMh, :logMd, :logc, :logspin, :log10M, :logρ, :logRe, :logsurf, :logv]
+    
+    # build dataframe arrays for making galaxy counts within each of the mass-environment histogram bins
+    deltadat = Array{Array{DataFrame, 1}}(nmbins)
+    
+    for i in 1:nmbins
+        deltadat[i] = Array{DataFrame}(ndbins)
+        massdf = datdf[mbins[i] .<= datdf[:log10M] .< mbins[i + 1], datcols]
+        for j in 1:ndbins
+            deltadat[i][j] = massdf[dbins[j] .<= massdf[:logρ] .< dbins[j + 1], datcols]
+        end
+    end
+    
+    # and similarly for the mock
+    mockdfarr = Array{Array{DataFrame, 1}}(nmbins)
+    
+    for i in 1:nmbins
+        mockdfarr[i] = Array{DataFrame}(ndbins)
+        massdf = mockdf[mbins[i] .<= mockdf[:log10M] .< mbins[i + 1], mockcols]
+        for j in 1:ndbins
+            mockdfarr[i][j] = massdf[dbins[j] .<= massdf[:logρ] .< dbins[j + 1], mockcols]
+        end
+    end
+
+    return deltadat, mockdfarr
+end
+
+
+"""
+Based on the provided data sample and parameter configuration flags, this function
+prepares the observations and the mock dataframes for the modeling.
+"""
+function prepare_dat(data_sample::Int,
+                     param_config::Int)
+
+    if !(data_sample in 1:4)
+        throw(ArgumentError("data_sample must be an integer from 1-4"))
+    end
+
+    if !(param_config in 1:7)
+        throw(ArgumentError("param_config must be an integer from 1-7"))
+    end
+
+    datdf, vol = get_dat(data_sample)
+    mockdf = get_mock(data_sample, mean(datdf[:logRe]), mean(datdf[:logsurf]), mean(datdf[:logv]))
+
+    # create a parameter switch array from the param_config value
+    varswitch = get_vars(param_config)
+
+    # use the data sample and switch to set the bin edges
+    mbins, dbins, rbins, sbins, vbins = set_bins(datdf, data_sample, varswitch)
+
+    # store the number of mass and environment density bins
+    nmbins = length(mbins) - 1
+    ndbins = length(dbins) - 1
+
+    deltadat, mockdfarr = make_dfarrs(datdf, mockdf,
+                                      mbins, dbins,
+                                      nmbins, ndbins)
+
+    # get the observations
+    obsdat = bincounts(deltadat, rbins, sbins, vbins)
+
+    # create a mask of the nonzero elements of the observations
+    nonzmask = find(obsdat .> 0)
+    
+    # and a tuple of the sums of the data and the log of the data
+    obsums = (sum(obsdat),
+              sum(obsdat[nonzmask] .* (log.(obsdat[nonzmask]))))
+      
+    # Get the conversion factor to compare the simulation volume with the data
+    volfac = vol / 400^3
+
+    return varswitch, rbins, sbins, vbins, mockdfarr, obsdat, nonzmask, obsums, volfac
+end
+
+
+"""
+Run an optimisation routine to find the best-fit parameters for a given model
+on a given sample.
+"""
+function run_optim(data_sample::Int,
+                   param_config::Int)
+
+    # generate variables for optimisation
+    const (varswitch,
+           rbins, sbins, vbins,
+           mockdfarr,
+           obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
+                                                           param_config)
+
+    # and add method to model bincount generation
+    anon_bincounts = params -> gen_mod_bincounts(params, mockdfarr, varswitch,
+                                                 rbins, sbins, vbins)
+
+    # and now to set the likelihood function
+    function like(params::Array{Float64,1})
+        
+        mockhist = anon_bincounts(params)
+        mockhist = mockhist * volfac + exp(-125)  # 
+        
+        score = cstat(mockhist, obsdat, obsums, nonzmask)
+        
+        score
+    end
+
+    # set the number of parameters and walkers from the varswitch array
+    ndims = 6 * sum(varswitch)
+    npop = ndims * 12
+    
+    lower = -10.0 * ones(ndims)
+    upper = 10.0 * ones(ndims)
+
+    # let intercept and linear terms be larger in magnitude
+    for i in 1:sum(varswitch)
+        lower[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = -100.0
+        upper[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = 100.0
+    end
+
+    optctrl = BlackBoxOptim.bbsetup(like;  # Method = :dxnes,\n",
+                                    SearchRange = collect(zip(lower, upper)),
+                                    # Population = optchain,
+                                    PopulationSize = npop)
+
+    res = BlackBoxOptim.bboptimize(optctrl; MaxSteps = 30000)
+
+    # grab the optimal value from the run to save
+    best = BlackBoxOptim.best_candidate(res)
+
+    # write to file
+    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
+    datdir = string(datdir, "/dat")
+    th, varstring = get_thres_varstring(data_sample, varswitch)
+    writedlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"))
+end
+
+
+"""
+Run MCMC using AffineInvariantMCMC for a given data sample and parameter space.
+Uses the optimised values for the parameters to generate walker initialisation.
+"""
+function run_mcmc(data_sample::Int,
+                  param_config::Int)
+
+    # generate variables again for posterior sampling
+    const (varswitch,
+           rbins, sbins, vbins,
+           mockdfarr,
+           obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
+                                                           param_config)
+
+    # and add the right method to model bincounts
+#     gen_mod_bincounts(params::Array{Float64,1}) = gen_mod_bincounts(params,
+#                                                                     mockdfarr,
+#                                                                     varswitch,
+#                                                                     rbins, sbins, vbins)
+    anon_bincounts = params -> gen_mod_bincounts(params, mockdfarr, varswitch,
+                                                 rbins, sbins, vbins)
+
+
+    # and now to set the logposterior for the sampler
+    function lnprob(params::Array{Float64,1})
+        
+        #mockhist = gen_mod_bincounts(params)
+        mockhist = anon_bincounts(params)
+        mockhist = mockhist * volfac + exp(-125)  # 
+        
+        score = cstat(mockhist, obsdat, obsums, nonzmask)
+        - score
+    end
+
+    # set parameters for the sampler
+    numdims = 6 * sum(varswitch)
+    numwalkers = ndims * 12
+    thinning = 5
+    numsamples_perwalker = 50
+    burnin = 10
+
+    # read best fit optimisation parameters
+    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
+    datdir = string(datdir, "/dat")
+    th, varstring = get_thres_varstring(data_sample, varswitch)
+    pars = readdlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"))
+    pars = squeeze(pars, 2)
+
+    # initialise walkers
+    x0 = randn(numdims, numwalkers)
+    x0 = x0 .+ pars
+
+    chain, likevals = AffineInvariantMCMC.sample(mclike, numwalkers, x0, burnin, 1)
+
+    for i in 1:100
+        chain, likevals = AffineInvariantMCMC.sample(mclike, numwalkers, chain[:, :, end], numsamples_perwalker, 1)
+        flatchain, flatlikevals = AffineInvariantMCMC.flattenmcmcarray(chain, likevals)
+        writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.chain"), flatchain)
+        writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.likevals"), flatlikevals)
     end
 end
 
-# create the same for mocks
-mockcols = [:logMh, :logMd, :logc, :logspin, :log10M, :logρ, :logRe, :logsurf, :logv]
 
-const mockdfarr = Array{Array{DataFrame, 1}}(nmbins)
+if length(ARGS) > 0 && length(ARGS) == 2
 
-for i in 1:nmbins
-    mockdfarr[i] = Array{DataFrame}(ndbins)
-    massdf = mockdf[mbins[i] .<= mockdf[:log10M] .< mbins[i + 1], mockcols]
-    for j in 1:ndbins
-        mockdfarr[i][j] = massdf[dbins[j] .<= massdf[:logρ] .< dbins[j + 1], mockcols]
+    # first argument passed is number sample to run mcmc for
+    num_sample = parse(Int, ARGS[1])
+
+    # second argument passed dictates which parameter configuration to use
+    param_val = parse(Int, ARGS[2])
+
+    # check if parameters have been optimised
+    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
+    datdir = string(datdir, "/dat")
+    th, varstring = get_thres_varstring(num_sample, param_val)
+    bestparams = string(datdir, "/optim/M", th, "/", varstring, ".dat")
+
+    # optimise the parameters for a first guess if necessary
+    if isfile(bestparams)
+        println("# # # # # # # # # # # # # # # # # # # # # # # # # # # #")
+        println("best-fit parameter guess exists, skipping optimisation")
+        println("# # # # # # # # # # # # # # # # # # # # # # # # # # # #")
+    else
+        println("# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #")
+        println("First, to find a guess for the best-fit parameters via optimisation")
+        println("# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #")
+        run_optim(num_sample, param_val)
     end
-end
 
-# use these to make the data observation
-const obsdat = bincounts(deltadat, rbins, sbins, vbins)
+    # and now get an mcmc chain
+    println("# # # # # # # # # # # # # # # # # # # # # # # # # # #")
+    println("now running mcmc initialised near the best-fit guess")
+    println("# # # # # # # # # # # # # # # # # # # # # # # # # # #")
+    run_mcmc(num_sample, param_val)
 
-# create a mask of the nonzero elements of the observations
-const nonzmask = find(obsdat .> 0)
-
-# and a tuple of the sums of the data and the log of the data
-const obsums = (sum(obsdat), sum(obsdat[nonzmask] .* (log.(obsdat[nonzmask]))))
-
-# set the volume ratio
-const volfac = vols[num_sample] / 400^3
-
-# add method to model bincount generation
-gen_mod_bincounts(params::Array{Float64,1}) = gen_mod_bincounts(params, mockdfarr, rbins, sbins, vbins)
-
-# define the log likelihood for the sampling
-function like(params::Array{Float64,1})
-
-    mockhist = gen_mod_bincounts(params)
-    mockhist = mockhist .* volfac + exp(-125)
-
-    score = cstat(mockhist, obsdat, obsums, nonzmask)
-    -score
+elseif length(ARGS) > 0 && length(args) != 2
+    println("error: incorrect number of arguments")
+    println("usage: julia run_mcmc.jl <sample number> <parameter config>")
 end
