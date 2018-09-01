@@ -22,7 +22,7 @@ end
 """Compute filename strings from the sample number and variable switch"""
 function get_thres_varstring(sample_int::Int, varswitch::Array{Int})
 
-    ths = [18, 19, 20, 20]
+    ths = ["18", "19", "20a", "20b"]
     th = ths[sample_int]
 
     vars = ["Re", "surf", "vdisp"]
@@ -49,9 +49,20 @@ function get_dat(data_sample::Int)
         volume = vols[3]
     else
         throw(ArgumentError("data_sample must be an integer from 1-4"))
-    end 
+    end
 
     return datdf, volume
+end
+
+
+function get_means(data_sample::Int, datdf)
+
+    minmass = [9.4, 9.8, 10.3, 10.6][data_sample]
+    maxmass = [9.8, 10.3, 10.6, 11.0][data_sample]
+
+    bindf = datdf[minmass .<= datdf[:log10M] .< maxmass, :]
+
+    return mean(bindf[:logRe]), mean(bindf[:logsurf]), mean(bindf[:logv])
 end
 
 
@@ -64,7 +75,7 @@ function get_mock(data_sample::Int, meanr, means, meanv)
     # load the corresponding mock
     ths = [18, 19, 20, 20]
     th = ths[data_sample]
-    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
+    datdir = join(split(abspath(@__DIR__), "/")[1:(end - 1)], "/")
     datdir = string(datdir, "/dat")
     mockdf = CSV.read(string(datdir, "/mocks/M", th, "_cenquen_mock.csv"))
 
@@ -101,19 +112,19 @@ function set_bins(datdf, sample_num::Int, varswitch::Array{Int})
         mbins = [10.6, 10.7, 10.8, 10.9, 11.0]
     end
     dbins = Array(linspace(-0.8, 1.0, 9))
-    
+
     if varswitch[1] == 1
         rbins = [-3, -2.75, -2.5, -2.25, -2, -1.75]
     else
         rbins = [minimum(datdf[:logRe]), maximum(datdf[:logRe]) + 1]
     end
-    
+
     if varswitch[2] == 1
         sbins = [8.5, 8.7, 8.9, 9.1, 9.3, 9.5]
     else
         sbins = [minimum(datdf[:logsurf]), maximum(datdf[:logsurf]) + 1]
     end
-    
+
     if varswitch[3] == 1
         vbins = [1.9, 2.02, 2.14, 2.26, 2.38, 2.5]
     else
@@ -134,10 +145,10 @@ function make_dfarrs(datdf::DataFrame, mockdf::DataFrame,
 
     const datcols = [:log10M, :logρ, :logRe, :logsurf, :logv]
     const mockcols = [:logMh, :logMd, :logc, :logspin, :log10M, :logρ, :logRe, :logsurf, :logv]
-    
+
     # build dataframe arrays for making galaxy counts within each of the mass-environment histogram bins
     deltadat = Array{Array{DataFrame, 1}}(nmbins)
-    
+
     for i in 1:nmbins
         deltadat[i] = Array{DataFrame}(ndbins)
         massdf = datdf[mbins[i] .<= datdf[:log10M] .< mbins[i + 1], datcols]
@@ -145,10 +156,10 @@ function make_dfarrs(datdf::DataFrame, mockdf::DataFrame,
             deltadat[i][j] = massdf[dbins[j] .<= massdf[:logρ] .< dbins[j + 1], datcols]
         end
     end
-    
+
     # and similarly for the mock
     mockdfarr = Array{Array{DataFrame, 1}}(nmbins)
-    
+
     for i in 1:nmbins
         mockdfarr[i] = Array{DataFrame}(ndbins)
         massdf = mockdf[mbins[i] .<= mockdf[:log10M] .< mbins[i + 1], mockcols]
@@ -177,7 +188,8 @@ function prepare_dat(data_sample::Int,
     end
 
     datdf, vol = get_dat(data_sample)
-    mockdf = get_mock(data_sample, mean(datdf[:logRe]), mean(datdf[:logsurf]), mean(datdf[:logv]))
+    meanvars = get_means(data_sample, datdf)
+    mockdf = get_mock(data_sample, meanvars...)
 
     # create a parameter switch array from the param_config value
     varswitch = get_vars(param_config)
@@ -198,15 +210,15 @@ function prepare_dat(data_sample::Int,
 
     # create a mask of the nonzero elements of the observations
     nonzmask = find(obsdat .> 0)
-    
+
     # and a tuple of the sums of the data and the log of the data
     obsums = (sum(obsdat),
               sum(obsdat[nonzmask] .* (log.(obsdat[nonzmask]))))
-      
+
     # Get the conversion factor to compare the simulation volume with the data
     volfac = vol / 400^3
 
-    return varswitch, rbins, sbins, vbins, mockdfarr, obsdat, nonzmask, obsums, volfac
+    return meanvars, varswitch, rbins, sbins, vbins, mockdfarr, obsdat, nonzmask, obsums, volfac
 end
 
 
@@ -218,7 +230,7 @@ function run_optim(data_sample::Int,
                    param_config::Int)
 
     # generate variables for optimisation
-    const (varswitch,
+    const (meanvars, varswitch,
            rbins, sbins, vbins,
            mockdfarr,
            obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
@@ -230,26 +242,26 @@ function run_optim(data_sample::Int,
 
     # and now to set the likelihood function
     function like(params::Array{Float64,1})
-        
+
         mockhist = anon_bincounts(params)
-        mockhist = mockhist * volfac + exp(-125)  # 
-        
+        mockhist = mockhist * volfac + exp(-125)  #
+
         score = cstat(mockhist, obsdat, obsums, nonzmask)
-        
+
         score
     end
 
     # set the number of parameters and walkers from the varswitch array
     ndims = 6 * sum(varswitch)
     npop = ndims * 12
-    
-    lower = -10.0 * ones(ndims)
-    upper = 10.0 * ones(ndims)
+
+    lower = -20.0 * ones(ndims)
+    upper = 20.0 * ones(ndims)
 
     # let intercept and linear terms be larger in magnitude
     for i in 1:sum(varswitch)
-        lower[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = -100.0
-        upper[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = 100.0
+        lower[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = -150.0
+        upper[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = 150.0
     end
 
     optctrl = BlackBoxOptim.bbsetup(like;  # Method = :dxnes,\n",
@@ -266,7 +278,31 @@ function run_optim(data_sample::Int,
     datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
     datdir = string(datdir, "/dat")
     th, varstring = get_thres_varstring(data_sample, varswitch)
-    writedlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"))
+    writedlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"), best)
+end
+
+
+"""
+This function computes a prior probability for a set of parameters. The prior
+assumes that there is not much of an effect due to secondary properties, so
+it is a gaussian centered on the parameters that would return the mean value
+for the variable at the intercept of the linear model. To remain conservative,
+the gaussian has a large variance, but large parameter values are penalised.
+"""
+function logprior(params, meanvars, varswitch)
+
+    means = zeros(params)
+    invvar = 0.04  # assume standard deviation of 5
+
+    nvars = sum(varswitch)  # number of data variables
+    logfac = -0.5 * log(2π * 25.0^(nvars * 6))
+
+    for i in 1:nvars
+        means[(6 * (i - 1) + 1)] = meanvars[Bool.(varswitch)][i]
+    end
+
+    return logfac - 0.5 * sum(invvar * (params .- means) .^ 2)
+
 end
 
 
@@ -278,38 +314,42 @@ function run_mcmc(data_sample::Int,
                   param_config::Int)
 
     # generate variables again for posterior sampling
-    const (varswitch,
+    const (meanvars, varswitch,
            rbins, sbins, vbins,
            mockdfarr,
            obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
                                                            param_config)
 
     # and add the right method to model bincounts
-#     gen_mod_bincounts(params::Array{Float64,1}) = gen_mod_bincounts(params,
-#                                                                     mockdfarr,
-#                                                                     varswitch,
-#                                                                     rbins, sbins, vbins)
     anon_bincounts = params -> gen_mod_bincounts(params, mockdfarr, varswitch,
                                                  rbins, sbins, vbins)
 
+    # add a method for the prior
+    anon_prior = params -> logprior(params, meanvars, varswitch)
 
     # and now to set the logposterior for the sampler
     function lnprob(params::Array{Float64,1})
-        
-        #mockhist = gen_mod_bincounts(params)
+
+        lnprior = anon_prior(params)
+
         mockhist = anon_bincounts(params)
-        mockhist = mockhist * volfac + exp(-125)  # 
-        
+        mockhist = mockhist * volfac + exp(-125)  #
+
         score = cstat(mockhist, obsdat, obsums, nonzmask)
-        - score
+
+        return lnprior - score
     end
 
     # set parameters for the sampler
     numdims = 6 * sum(varswitch)
-    numwalkers = ndims * 12
+    numwalkers = numdims * 12
     thinning = 5
     numsamples_perwalker = 50
     burnin = 10
+
+    #TODO check if means and vars of single var posteriors exist
+    #TODO initialise params for multivars using those if so
+    #TODO also, maybe set prior for double/triple vars using these too
 
     # read best fit optimisation parameters
     datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
@@ -319,13 +359,25 @@ function run_mcmc(data_sample::Int,
     pars = squeeze(pars, 2)
 
     # initialise walkers
-    x0 = randn(numdims, numwalkers)
+    x0 = 0.05 * randn(numdims, numwalkers)
     x0 = x0 .+ pars
 
-    chain, likevals = AffineInvariantMCMC.sample(mclike, numwalkers, x0, burnin, 1)
+#     println("lnprobs for the initial samples:")
+#     for i in 1:numwalkers
+#         println(lnprob(x0[:, i]))
+#     end
 
+#     println("burning in...")
+    chain, likevals = AffineInvariantMCMC.sample(lnprob, numwalkers, x0, burnin, 1)
+#     println("lnprobs after burnin:")
+#     println(likevals)
+
+    println("and starting mcmc...")
     for i in 1:100
-        chain, likevals = AffineInvariantMCMC.sample(mclike, numwalkers, chain[:, :, end], numsamples_perwalker, 1)
+        chain, likevals = AffineInvariantMCMC.sample(lnprob, numwalkers, chain[:, :, end], numsamples_perwalker, 1)
+#         println("lnprobs after one round of mcmc:")
+#         println(likevals)
+#         error("good nuff")
         flatchain, flatlikevals = AffineInvariantMCMC.flattenmcmcarray(chain, likevals)
         writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.chain"), flatchain)
         writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.likevals"), flatlikevals)
@@ -365,7 +417,7 @@ if length(ARGS) > 0 && length(ARGS) == 2
     println("# # # # # # # # # # # # # # # # # # # # # # # # # # #")
     run_mcmc(num_sample, param_val)
 
-elseif length(ARGS) > 0 && length(args) != 2
+elseif length(ARGS) > 0 && length(ARGS) != 2
     println("error: incorrect number of arguments")
     println("usage: julia run_mcmc.jl <sample number> <parameter config>")
 end

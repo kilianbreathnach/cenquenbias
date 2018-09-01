@@ -151,13 +151,13 @@ end
 
 
 """
-This function accepts the model parameters and computes a set of galaxy mock
-observations then bins the observed data points into our histogram.
+This function takes an array of mock dataframe arrays and a set of parameters,
+along with a switch on which variables are to be computed with the parameters.
+It then computes model values for the mock variables based on the parameters.
 """
-function gen_mod_bincounts(params::Array{Float64, 1},
-                           mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1},
-                           varswitch::Array{Int, 1},
-                           rbins, sbins, vbins)
+function gen_obs(params::Array{Float64, 1},
+                 mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1},
+                 varswitch::Array{Int, 1})
 
     # handle combinatorics of the three variable switches
     if varswitch[1] == 1
@@ -184,6 +184,19 @@ function gen_mod_bincounts(params::Array{Float64, 1},
     elseif varswitch[3] == 1
         v_func(params, mockdfs)
     end
+end
+
+
+"""
+This function accepts the model parameters and computes a set of galaxy mock
+observations using gen_obs, then bins the observed data points into our histogram.
+"""
+function gen_mod_bincounts(params::Array{Float64, 1},
+                           mockdfs::Array{Array{DataFrames.DataFrame, 1}, 1},
+                           varswitch::Array{Int, 1},
+                           rbins, sbins, vbins)
+
+    gen_obs(params, mockdfs, varswitch)
 
     hist = bincounts(mockdfs, rbins, sbins, vbins)
     hist
