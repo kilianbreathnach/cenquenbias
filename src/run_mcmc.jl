@@ -3,11 +3,22 @@ include("./fit_funcs.jl")
 include("./utils.jl")
 
 using CSV
+using Glob
 using AffineInvariantMCMC
 using CenQuenUtils
 
 import BlackBoxOptim
 import Jackknife.get_sdss_subvols
+
+
+"""
+This function returns the string for the base data directory
+"""
+function get_datdir()
+    datdir = join(split(realpath(@__DIR__), "/")[1:(end - 1)], "/")
+    datdir = string(datdir, "/dat")
+    return datdir
+end
 
 
 """
@@ -51,6 +62,13 @@ function get_dat(data_sample::Int)
         throw(ArgumentError("data_sample must be an integer from 1-4"))
     end
 
+    # compute the jackknife subvolumes of the data
+    radecs = zeros(size(datdf)[1], 2)
+    radecs[:, 1] = rad2deg.(datdf[:ra])
+    radecs[:, 2] = rad2deg.(datdf[:dec])
+
+    datdf[:jackvol] = get_sdss_subvols(radecs)
+
     return datdf, volume
 end
 
@@ -75,8 +93,7 @@ function get_mock(data_sample::Int, meanr, means, meanv)
     # load the corresponding mock
     ths = [18, 19, 20, 20]
     th = ths[data_sample]
-    datdir = join(split(abspath(@__DIR__), "/")[1:(end - 1)], "/")
-    datdir = string(datdir, "/dat")
+    datdir = get_datdir()
     mockdf = CSV.read(string(datdir, "/mocks/M", th, "_cenquen_mock.csv"))
 
     ## add extra columns for modeling
@@ -235,6 +252,7 @@ function run_optim(data_sample::Int,
            mockdfarr,
            obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
                                                            param_config)
+    nvars = sum(varswitch)
 
     # and add method to model bincount generation
     anon_bincounts = params -> gen_mod_bincounts(params, mockdfarr, varswitch,
@@ -252,14 +270,14 @@ function run_optim(data_sample::Int,
     end
 
     # set the number of parameters and walkers from the varswitch array
-    ndims = 6 * sum(varswitch)
+    ndims = 6 * nvars
     npop = ndims * 12
 
     lower = -20.0 * ones(ndims)
     upper = 20.0 * ones(ndims)
 
     # let intercept and linear terms be larger in magnitude
-    for i in 1:sum(varswitch)
+    for i in 1:nvars
         lower[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = -150.0
         upper[(6 * (i - 1) + 1):(6 * (i - 1) + 2)] = 150.0
     end
@@ -275,34 +293,171 @@ function run_optim(data_sample::Int,
     best = BlackBoxOptim.best_candidate(res)
 
     # write to file
-    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
-    datdir = string(datdir, "/dat")
+    datdir = get_datdir()
     th, varstring = get_thres_varstring(data_sample, varswitch)
     writedlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"), best)
 end
 
 
-"""
-This function computes a prior probability for a set of parameters. The prior
-assumes that there is not much of an effect due to secondary properties, so
-it is a gaussian centered on the parameters that would return the mean value
-for the variable at the intercept of the linear model. To remain conservative,
-the gaussian has a large variance, but large parameter values are penalised.
-"""
-function logprior(params, meanvars, varswitch)
+function get_chain_likevals(sample_num::Int,
+                            var_config::Int,
+                            chain_range::UnitRange{Int};
+                            subdir = nothing)
 
-    means = zeros(params)
-    invvar = 0.04  # assume standard deviation of 5
+    varswitch = get_vars(var_config)
+    th, varstr = get_thres_varstring(sample_num, varswitch)
 
-    nvars = sum(varswitch)  # number of data variables
-    logfac = -0.5 * log(2π * 25.0^(nvars * 6))
+    datdir = get_datdir()
 
-    for i in 1:nvars
-        means[(6 * (i - 1) + 1)] = meanvars[Bool.(varswitch)][i]
+    if subdir != nothing
+        dirstr = string(datdir, "/mcmc/M", th, "/", varstr, "/", subdir, "/")
+    else
+        dirstr = string(datdir, "/mcmc/M", th, "/", varstr, "/")
     end
 
-    return logfac - 0.5 * sum(invvar * (params .- means) .^ 2)
+    println(dirstr)
 
+    chains = glob("*.chain", dirstr)
+    likevals = glob("*.likevals", dirstr)
+
+    nfiles = size(chains)[1]
+
+    if chain_range[end] > nfiles
+        throw(BoundsError("chain_range is not compatible with existing files"))
+    end
+
+    chainnum = length(chain_range)
+
+    # check chain dimensions
+    testchain = readdlm(string(dirstr, "1.chain"))
+    ndims, nsamps = size(testchain)
+
+    #ndims = 6 * sum(varswitch)
+    #nsamps = ndims * 12 * 50
+
+    chainarr = Array{Float64}(ndims, nsamps * chainnum)
+    likearr = Array{Float64}(nsamps * chainnum)
+
+    j = 0
+    for i in chain_range
+
+        chain = readdlm(string(dirstr, "$i.chain"))
+        like = readdlm(string(dirstr, "$i.likevals"))
+
+        chainarr[:, (nsamps * j + 1):(nsamps * (j + 1))] = chain[:, :]
+        likearr[(nsamps * j + 1):(nsamps * (j + 1))] = like[:, 1]
+
+        j += 1
+    end
+
+    return chainarr, likearr
+end
+
+
+"""
+Function which returns the set of parameters that has the highest probability
+from a set of posterior samples.
+"""
+function get_max_post(sample_num::Int,
+                      var_config::Int,
+                      chain_range::UnitRange{Int};
+                      subdir = nothing)
+
+    chain, postvals = get_chain_likevals(sample_num,
+                                         var_config,
+                                         chain_range,
+                                         subdir = subdir)
+
+    maxval = maximum(postvals)
+    maxinds = find(postvals .== maxval)
+    maxapost = chain[:, maxinds[1]]
+
+    return maxapost
+end
+
+
+"""
+This function reads in an existing file of posterior samples and computes the
+means and variances in each of the parameters.
+"""
+function chain_meanvars(sample_num, var_config; subdir = nothing)
+
+    means = zeros(6)
+    vars = zeros(6)
+    chain, likevals = get_chain_likevals(sample_num,
+                                         var_config,
+                                         75:100,
+                                         subdir = subdir)
+
+    for i in 1:6
+        means[i] = mean(chain[i, :])
+        vars[i] = var(chain[i, :])
+    end
+
+    return means, vars
+end
+
+
+"""
+This function generates a set of means and variances for gaussians in each
+parameter to compute the prior probabilities over the parameters. For cases
+where more than one variable are being fit for, it looks for posterior chains
+from single variable runs to get prior probabilities. Otherwise the mean value
+for the observations of the variable are assumed for the intercept of the
+model, with zero mean for the other parameters and wide variances to remain
+conservative while penalising large parameter values.
+"""
+function get_prior_means_invvars(sample_num,
+                                 varswitch,
+                                 obsmeans;
+                                 subdir = nothing)
+
+    nvars = sum(varswitch)  # number of data variables
+
+    datdir = get_datdir()
+
+    # initialise return arrays
+    means = zeros(6 * nvars)
+    invvars = 0.04 * ones(6 * nvars)  # base assume a stddev of 5
+
+    if nvars > 1
+
+        j = 1
+        for (i, v) in enumerate(varswitch)
+
+            if v == 1
+
+                # grab means and variances of single variable posterior
+                chainmvs = chain_meanvars(sample_num,
+                                          2^(3 - i),
+                                          subdir = subdir)
+                means[(6 * (j - 1) + 1):(6 * j)] = chainmvs[1]
+                invvars[(6 * (j - 1) + 1):(6 * j)] = 1 ./ chainmvs[2]
+
+                # increase value of j for each variable found
+                j += 1
+            end
+        end
+
+    else
+        invvars[1:3] = 0.001  # mass parameters are not penalised much
+    end
+
+    return means, invvars
+end
+
+
+"""
+This function computes a prior probability for a set of parameters given a set
+of gaussian means and variances in each parameter.
+"""
+function logprior(params, means_invvars)
+
+    means, invvars = means_invvars
+
+    logfac = -0.5 * log(2π * 25.0^(length(params)))
+
+    return logfac - 0.5 * sum(invvars .* ((params .- means) .^ 2))
 end
 
 
@@ -311,7 +466,9 @@ Run MCMC using AffineInvariantMCMC for a given data sample and parameter space.
 Uses the optimised values for the parameters to generate walker initialisation.
 """
 function run_mcmc(data_sample::Int,
-                  param_config::Int)
+                  param_config::Int;
+                  subdir = nothing,
+                  outdir = nothing)
 
     # generate variables again for posterior sampling
     const (meanvars, varswitch,
@@ -319,13 +476,22 @@ function run_mcmc(data_sample::Int,
            mockdfarr,
            obsdat, nonzmask, obsums, volfac) = prepare_dat(data_sample,
                                                            param_config)
+    nvars = sum(varswitch)
+
+    # set data input/output variables
+    datdir = get_datdir()
+    th, varstring = get_thres_varstring(data_sample, varswitch)
 
     # and add the right method to model bincounts
     anon_bincounts = params -> gen_mod_bincounts(params, mockdfarr, varswitch,
                                                  rbins, sbins, vbins)
 
     # add a method for the prior
-    anon_prior = params -> logprior(params, meanvars, varswitch)
+    prior_mvs = get_prior_means_invvars(data_sample,
+                                        varswitch,
+                                        meanvars,
+                                        subdir = subdir)
+    anon_prior = params -> logprior(params, prior_mvs)
 
     # and now to set the logposterior for the sampler
     function lnprob(params::Array{Float64,1})
@@ -333,7 +499,7 @@ function run_mcmc(data_sample::Int,
         lnprior = anon_prior(params)
 
         mockhist = anon_bincounts(params)
-        mockhist = mockhist * volfac + exp(-125)  #
+        mockhist = mockhist * volfac + exp(-350)  #
 
         score = cstat(mockhist, obsdat, obsums, nonzmask)
 
@@ -341,25 +507,74 @@ function run_mcmc(data_sample::Int,
     end
 
     # set parameters for the sampler
-    numdims = 6 * sum(varswitch)
-    numwalkers = numdims * 12
+    numdims = 6 * nvars
+    numwalkers = numdims * 20
     thinning = 5
     numsamples_perwalker = 50
     burnin = 10
 
-    #TODO check if means and vars of single var posteriors exist
-    #TODO initialise params for multivars using those if so
-    #TODO also, maybe set prior for double/triple vars using these too
+    ### This is just optional code for testing alternative initialisations
+    # check if an alternative (non-optimisation) set of parameters exists
+    if isfile(string(datdir, "/mcmc/M", th, "/", varstring, ".alt"))
+        pars = readdlm(string(datdir, "/mcmc/M", th, "/", varstring, ".alt"))
+        pars = squeeze(pars, 2)
+        par_stdevs = 0.01
+        println("alt initialisation is running, parameters are:")
+        println(pars)
+    else
 
-    # read best fit optimisation parameters
-    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
-    datdir = string(datdir, "/dat")
-    th, varstring = get_thres_varstring(data_sample, varswitch)
-    pars = readdlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"))
-    pars = squeeze(pars, 2)
+        # otherwise, if a previous run exists, grab maximum a posteriori
+        if nvars == 1 && subdir != nothing
+
+            pars = get_max_post(data_sample,
+                                param_config,
+                                75:100,
+                                subdir = subdir)
+            par_stdevs = 0.01
+            println("running single variable mcmc with initial parameters:")
+            println(pars)
+
+        # get max posterior values for all sub variables if fitting multiple
+        elseif nvars > 1 && subdir != nothing
+
+            pars = zeros(numdims)
+
+            j = 1
+            for (i, v) in enumerate(varswitch)
+
+                if v == 1
+
+                    chainmax = get_max_post(data_sample,
+                                            2^(3 - i),
+                                            75:100,
+                                            subdir = subdir)
+                    pars[(6 * (j - 1) + 1):(6 * j)] = chainmax
+
+                    j += 1
+                end
+            end
+
+            par_stdevs = 0.01
+
+            println("got the max posterior vals for all parameters:")
+            println(pars)
+
+        # alternatively, use the prior means
+        elseif prior_mvs[1][2] != 0
+            pars = prior_mvs[1]
+            par_stdevs = prior_mvs[2]
+
+        # otherwise just use the optimisation values
+        else
+            # read best fit optimisation parameters
+            pars = readdlm(string(datdir, "/optim/M", th, "/", varstring, ".dat"))
+            pars = squeeze(pars, 2)
+            par_stdevs = 0.05
+        end
+    end
 
     # initialise walkers
-    x0 = 0.05 * randn(numdims, numwalkers)
+    x0 = par_stdevs .* randn(numdims, numwalkers)
     x0 = x0 .+ pars
 
 #     println("lnprobs for the initial samples:")
@@ -379,13 +594,20 @@ function run_mcmc(data_sample::Int,
 #         println(likevals)
 #         error("good nuff")
         flatchain, flatlikevals = AffineInvariantMCMC.flattenmcmcarray(chain, likevals)
-        writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.chain"), flatchain)
-        writedlm(string(datdir, "/mcmc/M", th, "/", varstring, "/$i.likevals"), flatlikevals)
+
+        if outdir != nothing
+            outpath = string(datdir, "/mcmc/M", th, "/", varstring, "/", outdir)
+        else
+            outpath = string(datdir, "/mcmc/M", th, "/", varstring)
+        end
+
+        writedlm(string(outpath, "/$i.chain"), flatchain)
+        writedlm(string(outpath, "/$i.likevals"), flatlikevals)
     end
 end
 
 
-if length(ARGS) > 0 && length(ARGS) == 2
+if length(ARGS) > 0 && length(ARGS) >= 2
 
     # first argument passed is number sample to run mcmc for
     num_sample = parse(Int, ARGS[1])
@@ -393,9 +615,25 @@ if length(ARGS) > 0 && length(ARGS) == 2
     # second argument passed dictates which parameter configuration to use
     param_val = parse(Int, ARGS[2])
 
+    # optional third argument sets chain subdirectory name
+    # for previous samples
+    if length(ARGS) >= 3
+        subdir = ARGS[3]
+        println("using subdir: ", subdir)
+    else
+        subdir = nothing
+    end
+
+    if length(ARGS) >= 4
+        outdir = ARGS[4]
+        println("using outdir: ", outdir)
+    else
+        outdir = nothing
+    end
+
+
     # check if parameters have been optimised
-    datdir = join(split(@__DIR__, "/")[1:(end - 1)], "/")
-    datdir = string(datdir, "/dat")
+    datdir = get_datdir()
     th, varstring = get_thres_varstring(num_sample, param_val)
     bestparams = string(datdir, "/optim/M", th, "/", varstring, ".dat")
 
@@ -415,7 +653,7 @@ if length(ARGS) > 0 && length(ARGS) == 2
     println("# # # # # # # # # # # # # # # # # # # # # # # # # # #")
     println("now running mcmc initialised near the best-fit guess")
     println("# # # # # # # # # # # # # # # # # # # # # # # # # # #")
-    run_mcmc(num_sample, param_val)
+    run_mcmc(num_sample, param_val, subdir = subdir, outdir = outdir)
 
 elseif length(ARGS) > 0 && length(ARGS) != 2
     println("error: incorrect number of arguments")

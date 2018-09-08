@@ -1,48 +1,4 @@
 include("./run_mcmc.jl")
-include("./obs_funcs.jl")
-include("./fit_funcs.jl")
-include("./Jackknife.jl")
-
-using Glob
-
-
-function get_chain_likevals(sample_num::Int,
-                            var_config::Int,
-                            chain_range::UnitRange{Int})
-
-    varswitch = get_vars(var_config)
-    th, varstr = get_thres_varstring(sample_num, varswitch)
-    dirstr = string("../dat/mcmc/M", th, "/", varstr, "/")
-
-    chains = glob(string(dirstr, "*.chain"))
-    likevals = glob(string(dirstr, "*.likevals"))
-
-    nfiles = size(chains)[1]
-
-    if chain_range[end] > nfiles
-        throw(BoundsError("chain_range is not compatible with existing files"))
-    end
-
-    chainnum = length(chain_range)
-    ndims = 6 * sum(varswitch)
-    nsamps = ndims * 12 * 50
-    chainarr = Array{Float64}(ndims, nsamps * chainnum)
-    likearr = Array{Float64}(nsamps * chainnum)
-
-    j = 0
-    for i in chain_range
-
-        chain = readdlm(string(dirstr, "$i.chain"))
-        like = readdlm(string(dirstr, "$i.likevals"))
-
-        chainarr[:, (nsamps * j + 1):(nsamps * (j + 1))] = chain[:, :]
-        likearr[(nsamps * j + 1):(nsamps * (j + 1))] = like[:, 1]
-
-        j += 1
-    end
-
-    return chainarr, likearr
-end
 
 
 function post_draw_ribbons(sample_num::Int,
@@ -50,7 +6,9 @@ function post_draw_ribbons(sample_num::Int,
                            dbinedges::Array{Float64} = Array(linspace(-0.8, 1, 9)),
                            yticks = nothing,
                            ndraws::Int = 50,
-                           chain_range::UnitRange{Int} = 75:100)
+                           chain_range::UnitRange{Int} = 75:100,
+                           like_cutoff::Float64 = -Inf,
+                           subdir = nothing)
 
     # set up bin values
     ndbins = length(dbinedges) - 1
@@ -60,10 +18,12 @@ function post_draw_ribbons(sample_num::Int,
     # set up variable names
     varswitch = get_vars(var_config)
     varnames = ["Rₑ", "ρₛ", "σᵥ"]
+    varcolors = [colorant"orange", colorant"magenta", colorant"green"]
     datcols = [:R_e, :surfdensR_eo2, :vdisp][Bool.(varswitch)]
     mockcols = [:logRe, :logsurf, :logv][Bool.(varswitch)]
     nvars = sum(varswitch)
     cols = varnames[Bool.(varswitch)]
+    ptcolors = varcolors[Bool.(varswitch)]
     cencols = [Symbol(string("cen", col)) for col in cols]
 
     # create a plot object and an array to hold plot layers for each variable
@@ -97,7 +57,7 @@ function post_draw_ribbons(sample_num::Int,
         # start with computing data values
         col = cols[k]
         datdf[Symbol(col)] = datdf[datcols[k]]
-        append!(ylabels, "Δ$col / ⟨$col⟩ₘ")
+        push!(ylabels, string("Δ$col / ⟨$col⟩ₘ"))
 #        yticks =
 
         # control for mass variations within the bin
@@ -118,7 +78,8 @@ function post_draw_ribbons(sample_num::Int,
                                     y=valmeans,
                                     Geom.point,
                                     Theme(point_size=1.0mm,
-                                    discrete_highlight_color=(u -> LCHab(0,0,0)))))
+                                          discrete_highlight_color=(u -> LCHab(0,0,0)),
+                                          default_color = ptcolors[k])))
 
         append!(sublayers[k], layer(x=datdmeans,
                                     y=valmeans,
@@ -131,12 +92,15 @@ function post_draw_ribbons(sample_num::Int,
     # and now to get the mcmc draws for the mock
     chain, likevals = get_chain_likevals(sample_num,
                                          var_config,
-                                         chain_range)
+                                         chain_range,
+                                         subdir = subdir)
+    chain = chain[:, likevals .> like_cutoff]
+
     for i in 1:ndraws
 
         # draw random set of parameters from posterior and generate values
         pars = chain[:, rand(1:end)]
-        gen_obs([[mockdf]], pars)
+        gen_obs(pars, [[mockdf]], varswitch)
 
         # make plot for each variable
         for k in 1:nvars
@@ -152,7 +116,8 @@ function post_draw_ribbons(sample_num::Int,
                                                ndbins,
                                                mockdf,
                                                Int.(mockdf[:subvol]),
-                                               (cencol, dbinedges,))
+                                               (cencol, dbinedges,),
+                                               nvols = 27)
             mlerrs = sqrt.(diag(mlcovars))
             mlemins = mlemeans .- mlerrs
             mlemaxs = mlemeans .+ mlerrs
@@ -239,4 +204,293 @@ function posterior_jackknife(sample_num::Int,
 
 
 
+end
+
+
+# function all_param_plot(;
+#                         subdir = "max_init",
+#                         chain_range::UnitRange{Int} = 75:100)
+#
+#     subplots = Array{Gadfly.Plot}(3, 4)
+#
+#     # some arrays for plot names and colours and yranges
+#     massrange = ["[9.4, 9.8]", "[9.8, 10.3]", "[10.3, 10.6]", "[10.6, 11.0]"]
+#     coeffnames = ["β<sub>Ṁ</sub>", "β<sub>c</sub>", "β<sub>λ</sub>"]
+#
+#     colors = [convert(LCHuv, colorant"orange"),
+#               convert(LCHuv, colorant"magenta"),
+#               convert(LCHuv, colorant"green"),
+#               convert(LCHuv, colorant"black")]
+#
+#     ytickarr = [Array(linspace(-5, 3, 9)),
+#                 Array(linspace(-2, 2, 5)),
+#                 Array(linspace(-3, 2, 6))]
+#
+#     # loop over mass bins
+#     for (i, th) in enumerate(["18", "19", "20a", "20b"])
+#
+#         # and matrices for the variable-coefficient means and errs
+#         cmeans = zeros(3, 3)
+#         cmins = zeros(3, 3)
+#         cmaxs = zeros(3, 3)
+#
+#         # loop over variables
+#         for (j, varname) in enumerate(["Re", "surf", "vdisp"])
+#
+#             chain, likevals = get_chain_likevals(i, 2^(3 - j),
+#                                                  chain_range,
+#                                                  subdir = subdir)
+#
+#             # loop over parameter coefficients
+#             for k in 1:3
+#
+#                 cmean = mean(chain[3 + k, :])
+#                 cvar = var(chain[3 + k, :])
+#                 cerr = sqrt(cvar)
+#
+#                 cmeans[j, k] = cmean
+#                 cmins[j, k] = cmean - cerr
+#                 cmaxs[j, k] = cmean + cerr
+#
+#             end
+#         end
+#
+#         # now draw the column of subplots
+#         for k in 1:3
+#
+#             if k == 3
+#                 xlabel = string("log<sub>10</sub> m<sub>*</sub> = ",
+#                                 massrange[i])
+#             else
+#                 xlabel = nothing
+#             end
+#
+#             # 1st column has ylabels
+#             if i == 1
+#                 ylabel = coeffnames[k]
+#             else
+#                 ylabel = nothing
+#             end
+#
+#             plotlayers = [ #coeff_layer,
+#                           layer(x=[1.0, 2.0, 3.0],
+#                                 color=[1, 2, 3],
+#                                 y=cmeans[:, k],
+#                                 shape=[Shape.xcross,
+#                                        Shape.star1,
+#                                        Shape.dtriangle],
+#                                 Geom.point,
+#                                 Theme(point_size=3mm)),
+#                           layer(x=[1.0, 2.0, 3.0],
+#                                 y=cmeans[:, k],
+#                                 ymin=cmins[:, k],
+#                                 ymax=cmaxs[:, k],
+#                                 color=[4],
+#                                 Geom.errorbar)]
+#
+#             subplots[k, i] = plot(plotlayers...,
+#                                   Guide.xticks(ticks=nothing),
+#                                   Guide.xlabel(xlabel), Guide.ylabel(ylabel),
+#                                   Theme(key_position = :none),
+#                                   Scale.color_discrete_manual(colors...))
+#         end
+#     end
+#
+#     gridstack(subplots)
+# end
+
+
+function get_param_means_errs(sample_num::Int,
+                              var_config::Int,
+                              chain_range::UnitRange{Int};
+                              subdir = nothing,
+                              baseind = 3,
+                              cutoff = -Inf)
+
+    chain, likevals = get_chain_likevals(sample_num,
+                                         var_config,
+                                         chain_range,
+                                         subdir = subdir)
+
+    mask = likevals .> cutoff
+
+    cmeans = zeros(3)
+    cmins = zeros(3)
+    cmaxs = zeros(3)
+
+    # loop over parameter coefficients
+    for k in 1:3
+
+        cmean = mean(chain[baseind + k, mask])
+        cvar = var(chain[baseind + k, mask])
+        cerr = sqrt(cvar)
+
+        cmeans[k] = cmean
+        cmins[k] = cmean - cerr
+        cmaxs[k] = cmean + cerr
+
+    end
+
+    return cmeans, cmins, cmaxs
+end
+
+
+
+"""
+var_num = [1, 2, 3] means [R_e, surf, vdisp] respectively
+"""
+function all_param_plot(var_num;
+                        subdir = "max_init",
+                        chain_range::UnitRange{Int} = 75:100)
+
+    # each row is for one parameter coefficient
+    # each column is for a set of mcmc chains
+    subplots = Array{Gadfly.Plot}(3, 3)
+
+    # some arrays for plot names and colours and yranges
+    varnames = ["Re", "surf", "vdisp"]
+    massrange = ["[9.4, 9.8]", "[9.8, 10.3]", "[10.3, 10.6]", "[10.6, 11.0]"]
+    coeffnames = ["β<sub>Ṁ</sub>", "β<sub>c</sub>", "β<sub>λ</sub>"]
+
+    varcolors = [colorant"orange", colorant"magenta", colorant"green"]
+    midcolors = []  # to store the colors needed for middle column
+
+    ytickarr = [Array(linspace(-5, 3, 9)),
+                Array(linspace(-2, 2, 5)),
+                Array(linspace(-3, 2, 6))]
+
+    cutoffarr = [-1e5 -Inf -Inf;  # each row corresponds to a sample
+                 -2e6 -Inf -Inf;  # and columns correspond to # of variables
+                 -6e6 -Inf -Inf;
+                 -3e6 -Inf -Inf]
+
+    # loop over subplot columns
+    for i in 1:3
+
+        # set up matrices for the variable-coefficient means and errs
+        if i != 2
+            cmeans = zeros(4, 3)
+            cmins = zeros(4, 3)
+            cmaxs = zeros(4, 3)
+
+        # need to get two sets of values for the double-variable runs
+        else
+            cmeans = zeros(2, 4, 3)
+            cmins = zeros(2, 4, 3)
+            cmaxs = zeros(2, 4, 3)
+        end
+
+        # loop over mass samples
+        for (j, th) in enumerate(["18", "19", "20a", "20b"])
+
+            if i != 2
+
+                if i == 1
+                    var_config = 2^(3 - var_num)
+                    chaynrayng = chain_range
+                    soobdeer = subdir
+                    baseind = 3
+                elseif i == 3
+                    var_config = 7
+                    chaynrayng = 30:50
+                    soobdeer = nothing
+                    baseind = 3 + 6 * (var_num - 1)
+                end
+
+                (cmeans[j, :],
+                 cmins[j, :],
+                 cmaxs[j, :]) = get_param_means_errs(j,
+                                                     var_config,
+                                                     chaynrayng,
+                                                     subdir = soobdeer,
+                                                     baseind = baseind)
+            else
+
+                varinds = [1, 2, 3]
+                deleteat!(varinds, var_num)
+
+                for k in 1:2
+
+                    # figure out index of other variable and store its colour
+                    otherind = varinds[k]
+                    push!(midcolors, varcolors[otherind])
+
+                    var_config = 2^(3 - var_num) + 2^(3 - otherind)
+                    chaynrayng = 30:55
+                    soobdeer = subdir
+                    if otherind < var_num
+                        baseind = 9
+                    else
+                        baseind = 3
+                    end
+
+                    (cmeans[k, j, :],
+                     cmins[k, j, :],
+                     cmaxs[k, j, :]) = get_param_means_errs(j,
+                                                            var_config,
+                                                            chaynrayng,
+                                                            subdir = subdir)
+                end
+
+            end
+        end
+
+        # now draw the column of subplots
+        for k in 1:3
+
+            if k == 3
+                xlabel = string("log<sub>10</sub> m<sub>*</sub>")
+            else
+                xlabel = nothing
+            end
+
+            # 1st column has ylabels
+            if i == 1
+                ylabel = coeffnames[k]
+            else
+                ylabel = nothing
+            end
+
+            if i != 2
+                plotlayers = [layer(x=[9.6, 10.05, 10.45, 10.8],
+                                    y=cmeans[:, k],
+                                    Geom.point,
+                                    Theme(point_size=2mm,
+                                          discrete_highlight_color=(u -> LCHab(0,0,0)),
+                                          default_color=varcolors[var_num])),
+                              layer(x=[9.6, 10.05, 10.45, 10.8],
+                                    y=cmeans[:, k],
+                                    ymin=cmins[:, k],
+                                    ymax=cmaxs[:, k],
+                                    color=[colorant"black"],
+                                    Geom.errorbar)]
+            else
+                 plotlayers = []
+                 for z in 1:2
+                     dx = (-1)^z * 0.05
+                     append!(plotlayers, [layer(x=[9.6, 10.05, 10.45, 10.8] + dx,
+                                          y=cmeans[z, :, k],
+                                          Geom.point,
+                                          Theme(point_size=2mm,
+                                                discrete_highlight_color=(u -> LCHab(0,0,0)),
+                                                default_color=midcolors[z])),
+                                          layer(x=[9.6, 10.05, 10.45, 10.8] + dx,
+                                                y=cmeans[z, :, k],
+                                                ymin=cmins[z, :, k],
+                                                ymax=cmaxs[z, :, k],
+                                                color=[colorant"black"],
+                                                Geom.errorbar)])
+                end
+
+            end
+
+            xticks = [9.4, 9.8, 10.3, 10.6, 11.0]
+            subplots[k, i] = plot(plotlayers...,
+                                  Guide.xticks(ticks=xticks),
+                                  Guide.xlabel(xlabel), Guide.ylabel(ylabel),
+                                  Theme(key_position = :none))
+        end
+    end
+
+    gridstack(subplots)
 end

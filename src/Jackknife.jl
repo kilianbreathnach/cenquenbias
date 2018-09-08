@@ -79,16 +79,16 @@ obsfunc(data, args...)
 
 another array with the same length as the data is passed containing the indices
 of the subvolumes. If the number of subvolumes is less than 5x5, this can be
-set with nside. By default, the covariance of the observables are also computed, though this can be changed to calculate only diagonal variances by
+set with nvols. By default, the covariance of the observables are also computed,
+though this can be changed to calculate only diagonal variances by
 setting covar to false. This function is also made to be robust to having
 subvolumes that lack observations.
 """
 function jackmeansvars(obsfunc::Function, obslen::Int,
                        data, subvolinds::Array{Int, 1}, args=();
-                       nside::Int = 5, covar::Bool = true)
+                       nvols::Int = 25, covar::Bool = true)
 
     # make an array to hold the subvolume observations
-    nvols = nside^2
     if obslen > 1
         subobs = Array{Float64}(nvols, obslen)
     else
@@ -110,6 +110,9 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
     nobsvols = Array{Int}(obslen)
     fininds = Array{Array{Int}}(obslen)
 
+    # in the event that not enough contain datapoints to compute variances
+    novolflag = zeros(Int, obslen)
+
     # this array will hold the jacknife sampled observations
     jackarray = Array{Float64}(obslen, nvols)
     # and this holds the jackknife mean estimates
@@ -129,6 +132,12 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
         end
 
         volfac = 1 / (nobs - 1)
+        if nobs < 2
+            #println("not enough subvolumes with observation!!")
+            #println("nobs: ", nobs)
+            volfac = 1.0
+            novolflag[j] = 1
+        end
 
         for i in 1:nobs
             if obslen > 1
@@ -138,7 +147,11 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
             end
         end
 
-        jackmeans[j] = sum(jackarray[j, finds]) / nobs
+        if nobs < 1
+            jackmeans[j] = NaN
+        else
+            jackmeans[j] = sum(jackarray[j, finds]) / nobs
+        end
     end
 
     # and now to construct a covariance matrix
@@ -150,6 +163,17 @@ function jackmeansvars(obsfunc::Function, obslen::Int,
         end
 
         for (i, jm) in enumerate(jackmeans)
+
+            # first check if there were enough observations
+            if novolflag[i] == 1
+                if !covar
+                    jackcovar[i] = NaN
+                else
+                    jackcovar[i, :] = NaN
+                    jackcovar[:, i] = NaN
+                end
+                continue
+            end
 
             if !covar
 
