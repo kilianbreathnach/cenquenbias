@@ -501,6 +501,10 @@ function run_mcmc(data_sample::Int,
         mockhist = anon_bincounts(params)
         mockhist = mockhist * volfac + exp(-350)  #
 
+        if sum(mockhist) == 0
+            return -Inf
+        end
+
         score = cstat(mockhist, obsdat, obsums, nonzmask)
 
         return lnprior - score

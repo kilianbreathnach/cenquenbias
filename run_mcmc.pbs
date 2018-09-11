@@ -7,7 +7,7 @@
 #PBS -l walltime=80:00:00
 
 # Name process
-#PBS -N 20_b-Re
+#PBS -N 20_b-Re_surf_vdisp
 
 # Set alerts (b)eginning, (e)end, (a)bort
 #PBS -m bea
@@ -16,11 +16,11 @@
 #PBS -M kww231@nyu.edu
 
 # set output and error filenames
-#PBS -o /home/users/kww231/dev/cenquenbias/pbsout/20_b-Re.out
-#PBS -e /home/users/kww231/dev/cenquenbias/pbsout/20_b-Re.err
+#PBS -o /home/users/kww231/dev/cenquenbias/pbsout/20_b-Re_surf_vdisp.out
+#PBS -e /home/users/kww231/dev/cenquenbias/pbsout/20_b-Re_surf_vdisp.err
 
 source $HOME/.bashrc
 cd $HOME/dev/cenquenbias/src
 export JULIA_PKGDIR=/home/users/kww231/.playground/share/phd/packages
 echo "everything setup, time to run the code..."
-julia run_mcmc.jl 4 4 max_init_oldpost max_init
+julia run_mcmc.jl 4 7 max_init final

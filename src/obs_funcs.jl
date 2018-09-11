@@ -2,9 +2,12 @@ using CSV
 using DataFrames
 using Distributions
 using Cosmology
+
+Pkg.checkout("Gadfly", "tn/density-revamp")
 using Gadfly
 using Formatting
 using Compose, Colors
+
 include("./Jackknife.jl")
 using .Jackknife
 

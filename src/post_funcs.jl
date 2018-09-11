@@ -359,10 +359,8 @@ function all_param_plot(var_num;
                 Array(linspace(-2, 2, 5)),
                 Array(linspace(-3, 2, 6))]
 
-    cutoffarr = [-1e5 -Inf -Inf;  # each row corresponds to a sample
-                 -2e6 -Inf -Inf;  # and columns correspond to # of variables
-                 -6e6 -Inf -Inf;
-                 -3e6 -Inf -Inf]
+    # cutoff values for likelihoods in each sample
+    cutoffarr = [-3e5, -6e6, -1e7, -7e6]
 
     # loop over subplot columns
     for i in 1:3
@@ -388,12 +386,10 @@ function all_param_plot(var_num;
                 if i == 1
                     var_config = 2^(3 - var_num)
                     chaynrayng = chain_range
-                    soobdeer = subdir
                     baseind = 3
                 elseif i == 3
                     var_config = 7
-                    chaynrayng = 30:50
-                    soobdeer = nothing
+                    chaynrayng = 20:42
                     baseind = 3 + 6 * (var_num - 1)
                 end
 
@@ -402,7 +398,8 @@ function all_param_plot(var_num;
                  cmaxs[j, :]) = get_param_means_errs(j,
                                                      var_config,
                                                      chaynrayng,
-                                                     subdir = soobdeer,
+                                                     subdir = subdir,
+                                                     cutoff = cutoffarr[j],
                                                      baseind = baseind)
             else
 
@@ -416,8 +413,6 @@ function all_param_plot(var_num;
                     push!(midcolors, varcolors[otherind])
 
                     var_config = 2^(3 - var_num) + 2^(3 - otherind)
-                    chaynrayng = 30:55
-                    soobdeer = subdir
                     if otherind < var_num
                         baseind = 9
                     else
@@ -428,7 +423,8 @@ function all_param_plot(var_num;
                      cmins[k, j, :],
                      cmaxs[k, j, :]) = get_param_means_errs(j,
                                                             var_config,
-                                                            chaynrayng,
+                                                            chain_range,
+                                                            cutoff = cutoffarr[j],
                                                             subdir = subdir)
                 end
 
@@ -489,6 +485,180 @@ function all_param_plot(var_num;
                                   Guide.xticks(ticks=xticks),
                                   Guide.xlabel(xlabel), Guide.ylabel(ylabel),
                                   Theme(key_position = :none))
+        end
+    end
+
+    gridstack(subplots)
+end
+
+
+function all_param_violins(var_num;
+                           subdir = "max_init",
+                           chain_range::UnitRange{Int} = 75:100)
+
+    # each row is for one parameter coefficient
+    # each column is for a set of mcmc chains
+    subplots = Array{Gadfly.Plot}(3, 3)
+
+    # some arrays for plot names and colours and yranges
+    varnames = ["Re", "surf", "vdisp"]
+    massrange = ["[9.4, 9.8]", "[9.8, 10.3]", "[10.3, 10.6]", "[10.6, 11.0]"]
+    coeffnames = ["β<sub>Ṁ</sub>", "β<sub>c</sub>", "β<sub>λ</sub>"]
+
+    varcolors = [colorant"orange", colorant"magenta", colorant"green"]
+    midcolors = []  # to store the colors needed for middle column
+
+    ytickarr = [Array(linspace(-5, 3, 9)),
+                Array(linspace(-2, 2, 5)),
+                Array(linspace(-3, 2, 6))]
+
+    # cutoff values for likelihoods in each sample
+    cutoffarr = [-3e5, -6e6, -1e7, -7e6]
+
+    # loop over subplot columns
+    for i in 1:3
+
+        # set up matrices for the variable-coefficient means and errs
+        if i != 2
+            csamps = Array{Array{Float64}}(4, 3)
+
+        # need to get two sets of values for the double-variable runs
+        else
+            csamps = Array{Array{Float64}}(2, 4, 3)
+        end
+
+        # loop over mass samples
+        for (j, th) in enumerate(["18", "19", "20a", "20b"])
+
+            if i != 2
+
+                if i == 1
+                    var_config = 2^(3 - var_num)
+                    chaynrayng = chain_range
+                    baseind = 3
+                elseif i == 3
+                    var_config = 7
+                    chaynrayng = 20:42
+                    baseind = 3 + 6 * (var_num - 1)
+                end
+
+                chain, likevals = get_chain_likevals(j,
+                                                     var_config,
+                                                     chaynrayng,
+                                                     subdir = subdir)
+                chain = chain[:, likevals .> cutoffarr[j]]
+
+                for z in 1:3
+                    csamps[j, z] = chain[baseind + z, :]
+                end
+
+            else
+
+                varinds = [1, 2, 3]
+                deleteat!(varinds, var_num)
+
+                for k in 1:2
+
+                    # figure out index of other variable and store its colour
+                    otherind = varinds[k]
+                    push!(midcolors, varcolors[otherind])
+
+                    var_config = 2^(3 - var_num) + 2^(3 - otherind)
+                    if otherind < var_num
+                        baseind = 9
+                    else
+                        baseind = 3
+                    end
+
+                    chain, likevals = get_chain_likevals(j,
+                                                         var_config,
+                                                         chain_range,
+                                                         subdir = subdir)
+                    chain = chain[:, likevals .> cutoffarr[j]]
+
+                    for z in 1:3
+                        csamps[k, j, z] = chain[baseind + z, :]
+                    end
+
+                end
+
+            end
+        end
+
+        # now draw the column of subplots
+        for k in 1:3
+
+            if k == 3
+                xlabel = string("log<sub>10</sub> m<sub>*</sub>")
+            else
+                xlabel = nothing
+            end
+
+            # 1st column has ylabels
+            if i == 1
+                ylabel = coeffnames[k]
+            else
+                ylabel = nothing
+            end
+
+            if i != 2
+
+                # create dataframe for violin plot
+                plotdf = DataFrame(data = [], group = [])
+                for j in 1:4
+                    nextdf = DataFrame(data = rand(csamps[j, k], 8000),
+                                       group = massrange[j])
+                    plotdf = vcat(plotdf, nextdf)
+                end
+
+                subplots[k, i] = plot(plotdf,
+                                      x = :group,
+                                      y = :data,
+                                      Geom.violin, #(trim = false),
+                                      Theme(default_color=varcolors[var_num]),
+                                      #Coord.Cartesian(ymin=-5, ymax=5),
+                                      Guide.xlabel(xlabel), Guide.ylabel(ylabel))
+                                      #Theme(key_position = :none))
+
+            else
+
+                varinds = [1, 2, 3]
+                deleteat!(varinds, var_num)
+
+                plotdf = DataFrame(data = [], group = [])
+                types = Array{String,1}()
+
+                for z in 1:2
+
+                    otherind = varinds[z]
+
+                    for j in 1:4
+
+                        nextdf = DataFrame(data = rand(csamps[z, j, k], 8000),
+                                           group = massrange[j])
+                        plotdf = vcat(plotdf, nextdf)
+
+                        append!(types, fill(varnames[otherind], 8000))
+                                            #length(csamps[z, j, k])))
+                    end
+                end
+
+                #println(size(types))
+                #println(size(plotdf))
+
+                subplots[k, i] = plot(plotdf,
+                                      x = :group,
+                                      y = :data,
+                                      color = types,
+                                      Geom.violin) #(trim = false))
+                                      #Theme(default_color=midcolors[z])
+                                      #Scale.color_discrete_manual(midcolors...),
+                                      #Coord.Cartesian(ymin=-5, ymax=5),
+                                      #Guide.xlabel(xlabel), Guide.ylabel(ylabel))
+                                      #Theme(key_position = :none))
+
+            end
+
         end
     end
 
