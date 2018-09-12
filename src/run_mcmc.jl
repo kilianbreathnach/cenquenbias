@@ -5,10 +5,10 @@ include("./utils.jl")
 using CSV
 using Glob
 using AffineInvariantMCMC
-using CenQuenUtils
+using .CenQuenUtils
 
 import BlackBoxOptim
-import Jackknife.get_sdss_subvols
+import .Jackknife.get_sdss_subvols
 
 
 """

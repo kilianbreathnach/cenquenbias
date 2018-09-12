@@ -3,7 +3,15 @@ using DataFrames
 using Distributions
 using Cosmology
 
-Pkg.checkout("Gadfly", "tn/density-revamp")
+# need to get the right version of Gadfly and dependencies to work with
+# julia v0.7 and create split violin plots
+using Pkg
+ps = Pkg.PackageSpec(name = "Compose", rev = "master")
+Pkg.add(ps)
+
+ps = Pkg.PackageSpec(url = "https://github.com/kilianbreathnach/Gadfly.jl",
+                     rev = "julia07-violins")
+Pkg.add(ps)
 using Gadfly
 using Formatting
 using Compose, Colors
@@ -222,7 +230,7 @@ function massenv_plot(galdf, col,
         xlabel = " log₁₀(δ + 1)"
 
         if i == 1
-            ylabel = "Δ$col / ⟨$col⟩<sub>M</sub>"
+            ylabel = "Δ$(col) / ⟨$(col)⟩<sub>M</sub>"
         else
             ylabel = nothing
         end

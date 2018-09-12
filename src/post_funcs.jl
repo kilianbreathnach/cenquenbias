@@ -57,7 +57,7 @@ function post_draw_ribbons(sample_num::Int,
         # start with computing data values
         col = cols[k]
         datdf[Symbol(col)] = datdf[datcols[k]]
-        push!(ylabels, string("Δ$col / ⟨$col⟩ₘ"))
+        push!(ylabels, string("Δ$(col) / ⟨$(col)⟩ₘ"))
 #        yticks =
 
         # control for mass variations within the bin
