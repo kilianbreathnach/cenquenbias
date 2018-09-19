@@ -1,4 +1,5 @@
 include("./run_mcmc.jl")
+import Cairo, Fontconfig
 
 
 function post_draw_ribbons(sample_num::Int,
@@ -341,6 +342,8 @@ var_num = [1, 2, 3] means [R_e, surf, vdisp] respectively
 """
 function all_param_plot(var_num;
                         subdir = "max_init",
+                        ymins = nothing,
+                        ymaxs = nothing,
                         chain_range::UnitRange{Int} = 75:100)
 
     # each row is for one parameter coefficient
@@ -360,7 +363,12 @@ function all_param_plot(var_num;
                 Array(linspace(-3, 2, 6))]
 
     # cutoff values for likelihoods in each sample
-    cutoffarr = [-3e5, -6e6, -1e7, -7e6]
+    #cutoffarr = [-3e5, -6e6, -1e7, -7e6]
+
+    # these are the tight cutoffs, columns are mass, rows are # of variables
+    cutoffarr = [-1e3 -2e3 -5e3 -5e3;
+                 -1e3 -1e4 -3e4 -1e4;
+                 -1e3 -5e5 -5e5 -1e6]
 
     # loop over subplot columns
     for i in 1:3
@@ -389,7 +397,7 @@ function all_param_plot(var_num;
                     baseind = 3
                 elseif i == 3
                     var_config = 7
-                    chaynrayng = 20:42
+                    chaynrayng = 40:50
                     baseind = 3 + 6 * (var_num - 1)
                 end
 
@@ -399,7 +407,7 @@ function all_param_plot(var_num;
                                                      var_config,
                                                      chaynrayng,
                                                      subdir = subdir,
-                                                     cutoff = cutoffarr[j],
+                                                     cutoff = cutoffarr[i, j],
                                                      baseind = baseind)
             else
 
@@ -424,7 +432,7 @@ function all_param_plot(var_num;
                      cmaxs[k, j, :]) = get_param_means_errs(j,
                                                             var_config,
                                                             chain_range,
-                                                            cutoff = cutoffarr[j],
+                                                            cutoff = cutoffarr[i, j],
                                                             subdir = subdir)
                 end
 
@@ -447,11 +455,24 @@ function all_param_plot(var_num;
                 ylabel = nothing
             end
 
+            # set y axis range
+            if ymins != nothing
+                ymin = ymins[k]
+            else
+                ymin = -5
+            end
+
+            if ymaxs != nothing
+                ymax = ymaxs[k]
+            else
+                ymax = 5
+            end
+
             if i != 2
                 plotlayers = [layer(x=[9.6, 10.05, 10.45, 10.8],
                                     y=cmeans[:, k],
                                     Geom.point,
-                                    Theme(point_size=2mm,
+                                    Theme(point_size=1.0mm,
                                           discrete_highlight_color=(u -> LCHab(0,0,0)),
                                           default_color=varcolors[var_num])),
                               layer(x=[9.6, 10.05, 10.45, 10.8],
@@ -467,7 +488,7 @@ function all_param_plot(var_num;
                      append!(plotlayers, [layer(x=[9.6, 10.05, 10.45, 10.8] + dx,
                                           y=cmeans[z, :, k],
                                           Geom.point,
-                                          Theme(point_size=2mm,
+                                          Theme(point_size=1.0mm,
                                                 discrete_highlight_color=(u -> LCHab(0,0,0)),
                                                 default_color=midcolors[z])),
                                           layer(x=[9.6, 10.05, 10.45, 10.8] + dx,
@@ -484,6 +505,7 @@ function all_param_plot(var_num;
             subplots[k, i] = plot(plotlayers...,
                                   Guide.xticks(ticks=xticks),
                                   Guide.xlabel(xlabel), Guide.ylabel(ylabel),
+                                  Coord.Cartesian(ymin=ymin, ymax=ymax),
                                   Theme(key_position = :none))
         end
     end
@@ -494,6 +516,8 @@ end
 
 function all_param_violins(var_num;
                            subdir = "max_init",
+                           ymins = nothing,
+                           ymaxs = nothing,
                            chain_range::UnitRange{Int} = 75:100)
 
     # each row is for one parameter coefficient
@@ -508,12 +532,13 @@ function all_param_violins(var_num;
     varcolors = [colorant"orange", colorant"magenta", colorant"green"]
     midcolors = []  # to store the colors needed for middle column
 
-    ytickarr = [Array(linspace(-5, 3, 9)),
-                Array(linspace(-2, 2, 5)),
-                Array(linspace(-3, 2, 6))]
-
     # cutoff values for likelihoods in each sample
-    cutoffarr = [-3e5, -6e6, -1e7, -7e6]
+    #cutoffarr = [-3e5, -6e6, -1e7, -7e6]
+
+    # these are the tight cutoffs, columns are mass, rows are # of variables
+    cutoffarr = [-1e3 -2e3 -5e3 -5e3;
+                 -1e3 -1e4 -3e4 -1e4;
+                 -1e3 -5e5 -5e5 -1e6]
 
     # loop over subplot columns
     for i in 1:3
@@ -538,7 +563,7 @@ function all_param_violins(var_num;
                     baseind = 3
                 elseif i == 3
                     var_config = 7
-                    chaynrayng = 20:42
+                    chaynrayng = 40:50
                     baseind = 3 + 6 * (var_num - 1)
                 end
 
@@ -546,7 +571,7 @@ function all_param_violins(var_num;
                                                      var_config,
                                                      chaynrayng,
                                                      subdir = subdir)
-                chain = chain[:, likevals .> cutoffarr[j]]
+                chain = chain[:, likevals .> cutoffarr[i, j]]
 
                 for z in 1:3
                     csamps[j, z] = chain[baseind + z, :]
@@ -574,7 +599,7 @@ function all_param_violins(var_num;
                                                          var_config,
                                                          chain_range,
                                                          subdir = subdir)
-                    chain = chain[:, likevals .> cutoffarr[j]]
+                    chain = chain[:, likevals .> cutoffarr[i, j]]
 
                     for z in 1:3
                         csamps[k, j, z] = chain[baseind + z, :]
@@ -601,6 +626,19 @@ function all_param_violins(var_num;
                 ylabel = nothing
             end
 
+            # set y axis range
+            if ymins != nothing
+                ymin = ymins[k]
+            else
+                ymin = -5
+            end
+
+            if ymaxs != nothing
+                ymax = ymaxs[k]
+            else
+                ymax = 5
+            end
+
             if i != 2
 
                 # create dataframe for violin plot
@@ -616,9 +654,8 @@ function all_param_violins(var_num;
                                       y = :data,
                                       Geom.violin, #(trim = false),
                                       Theme(default_color=varcolors[var_num]),
-                                      #Coord.Cartesian(ymin=-5, ymax=5),
+                                      Coord.Cartesian(ymin=ymin, ymax=ymax),
                                       Guide.xlabel(xlabel), Guide.ylabel(ylabel))
-                                      #Theme(key_position = :none))
 
             else
 
@@ -639,23 +676,18 @@ function all_param_violins(var_num;
                         plotdf = vcat(plotdf, nextdf)
 
                         append!(types, fill(varnames[otherind], 8000))
-                                            #length(csamps[z, j, k])))
                     end
                 end
-
-                #println(size(types))
-                #println(size(plotdf))
 
                 subplots[k, i] = plot(plotdf,
                                       x = :group,
                                       y = :data,
                                       color = types,
-                                      Geom.violin) #(trim = false))
-                                      #Theme(default_color=midcolors[z])
-                                      #Scale.color_discrete_manual(midcolors...),
-                                      #Coord.Cartesian(ymin=-5, ymax=5),
-                                      #Guide.xlabel(xlabel), Guide.ylabel(ylabel))
-                                      #Theme(key_position = :none))
+                                      Geom.violin,
+                                      Scale.color_discrete_manual(midcolors...),
+                                      Coord.Cartesian(ymin=ymin, ymax=ymax),
+                                      Guide.xlabel(xlabel), Guide.ylabel(ylabel),
+                                      Theme(key_position = :none))
 
             end
 

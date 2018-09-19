@@ -1,7 +1,5 @@
 module Jackknife
 using NearestNeighbors
-
-# Pkg.checkout("Distances", "v0.6.0"); Pkg.build("Distances")
 using Distances
 
 export jackmeansvars
@@ -25,9 +23,9 @@ function get_sdss_subvols(radec; nside = 5)
     ras = rands[:, 1]
     decs = rands[:, 2]
 
-    randarr = zeros(nrands, 2)
-    randarr[:, 1] = ras
-    randarr[:, 2] = decs
+    randarr = zeros(2, nrands)
+    randarr[1, :] = ras
+    randarr[2, :] = decs
 
     # find the 2-d "quantiles" of the randoms,
     # according to the number of sides set for subvolumes
@@ -58,8 +56,8 @@ function get_sdss_subvols(radec; nside = 5)
     end
 
     # now set up a tree to efficiently search for nearest randoms to the galaxies
-    balltree = BallTree(randarr', Distances.Haversine(1.0))
-    nninds, dists = knn(balltree, radec', 1)
+    balltree = BallTree(randarr, Distances.Haversine(1.0))
+    nninds, dists = knn(balltree, Array(radec'), 1)
 
     # get the subvolume indices of the data
     datquants = arrquants[[n[1] for n in nninds]]

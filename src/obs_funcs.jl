@@ -3,15 +3,6 @@ using DataFrames
 using Distributions
 using Cosmology
 
-# need to get the right version of Gadfly and dependencies to work with
-# julia v0.7 and create split violin plots
-using Pkg
-ps = Pkg.PackageSpec(name = "Compose", rev = "master")
-Pkg.add(ps)
-
-ps = Pkg.PackageSpec(url = "https://github.com/kilianbreathnach/Gadfly.jl",
-                     rev = "julia07-violins")
-Pkg.add(ps)
 using Gadfly
 using Formatting
 using Compose, Colors
@@ -227,10 +218,12 @@ function massenv_plot(galdf, col,
         valmaxs = valmeans .+ valerrs
 
         # get axis labels and ticks for panel plots
-        xlabel = " log₁₀(δ + 1)"
+        rho = "ρ"
+        xlabel = "log<sub>10</sub> $(rho)/⟨$(rho)⟩"
+        println(xlabel)
 
         if i == 1
-            ylabel = "Δ$(col) / ⟨$(col)⟩<sub>M</sub>"
+            ylabel = "Δ$(col) / ⟨$(col)⟩<sub>m</sub>"
         else
             ylabel = nothing
         end
@@ -268,7 +261,7 @@ function massenv_plot(galdf, col,
                                  major_label_font_size=12pt),
                            Guide.annotation(compose(context(),
                                                     Compose.text(anvals[1], yrange[anvals[2]],
-                                                                 Formatting.format("log₁₀(M<sub>*</sub>) = {1:.1f}", mlabels[i])),
+                                                                 Formatting.format("log<sub>10</sub>(m<sub>*</sub>) = {1:.1f}", mlabels[i])),
                                                     fontsize(12pt))),
                            Guide.annotation(compose(context(),
                                                     Compose.text(anvals[1], yrange[anvals[2] - 1],

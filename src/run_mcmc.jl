@@ -322,14 +322,15 @@ function get_chain_likevals(sample_num::Int,
 
     nfiles = size(chains)[1]
 
-    if chain_range[end] > nfiles
+    if length(chain_range) > nfiles
         throw(BoundsError("chain_range is not compatible with existing files"))
     end
 
     chainnum = length(chain_range)
 
     # check chain dimensions
-    testchain = readdlm(string(dirstr, "1.chain"))
+    first = chain_range[1]
+    testchain = readdlm(string(dirstr, "$first.chain"))
     ndims, nsamps = size(testchain)
 
     #ndims = 6 * sum(varswitch)
