@@ -383,16 +383,21 @@ means and variances in each of the parameters.
 """
 function chain_meanvars(sample_num, var_config; subdir = nothing)
 
+    # tight cutoff for final
+    cutoffs = [-1e3 -2e3 -5e3 -5e3]
+    cutoff = cutoffs[sample_num]
+
     means = zeros(6)
     vars = zeros(6)
     chain, likevals = get_chain_likevals(sample_num,
                                          var_config,
                                          75:100,
                                          subdir = subdir)
+    mask = likevals .> cutoff
 
     for i in 1:6
-        means[i] = mean(chain[i, :])
-        vars[i] = var(chain[i, :])
+        means[i] = mean(chain[i, mask])
+        vars[i] = var(chain[i, mask])
     end
 
     return means, vars
@@ -494,19 +499,22 @@ function run_mcmc(data_sample::Int,
                                         subdir = subdir)
     anon_prior = params -> logprior(params, prior_mvs)
 
+    nonzlen = length(nonzmask)
+
     # and now to set the logposterior for the sampler
     function lnprob(params::Array{Float64,1})
 
         lnprior = anon_prior(params)
 
         mockhist = anon_bincounts(params)
-        mockhist = mockhist * volfac + exp(-350)  #
+        mockhist = mockhist * volfac
 
-        if sum(mockhist) == 0
+        if sum(mockhist .> 0) < (nonzlen / 3)
             return -Inf
         end
 
         score = cstat(mockhist, obsdat, obsums, nonzmask)
+        # score = cash(mockhist, obsdat, nonzmask)
 
         return lnprior - score
     end

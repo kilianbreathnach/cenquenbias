@@ -212,5 +212,13 @@ to avoid unnecessary summing and unstable values.
 """
 function cstat(mod, obs, obsums, nonz)
     modsum = sum(mod)
+    mod .+= exp(-350)
     return 2 * (modsum - obsums[1] + obsums[2] - sum(@. obs[nonz] * log(mod[nonz])))
+end
+
+
+function cash(mod, obs, nonz)
+    modsum = sum(mod)
+    mod .+= exp(-350)
+    return 2 * (modsum - sum(@. obs[nonz] * log(mod[nonz])))
 end

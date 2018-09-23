@@ -5,11 +5,11 @@ varnames = ["Re", "surf", "vdisp"]
 
 # loop over each of the mass samples
 #for i in range(1, 5):
-for i in [1, 2, 4]:
+for i in [4]: # , 2, 4]:
 
     # and then over each of the variable configurations
     #for j in range(1, 8):
-    for j in [7]: # [1, 2, 3, 4, 5, 6]:
+    for j in [2]: # , 2, 4]:
 
         # generate the process string for the sample and variables
         binswitch = [int(b) for b in format(j, '03b')]
@@ -41,8 +41,8 @@ for i in [1, 2, 4]:
             elif "julia" in line[:7]:
                 newline = line.split()
                 newline = " ".join(newline[:2] +
-                                   [str(i), str(j)] +
-                                   newline[-2:])
+                                   [str(i), str(j)])# +
+                                   #newline[-2:])  # for extra args
                 fnew.write(newline + "\n")
             # otherwise copy old line
             else:
